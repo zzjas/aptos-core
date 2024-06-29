@@ -52,6 +52,7 @@ impl Default for Config {
                 "unassigned variable".to_string(),
                 "unbound type".to_string(),
                 "incompatible types".to_string(),
+                "unexpected token".to_string(),
             ],
 
             experiment_combos: vec![
