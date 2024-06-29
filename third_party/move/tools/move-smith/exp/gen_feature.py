@@ -5,7 +5,6 @@ from prompts import load_prompt
 from pathlib import Path
 from utils import (
     create_move_packge,
-    run_transactional_with_code,
     check_compile,
     check_transactional,
 )
@@ -91,8 +90,6 @@ ALL_FEATURES = [
     "the borrow_global_mut operation",
     "the exists operation",
 ]
-
-ALL_FEATURES = ALL_FEATURES[:5]
 
 
 def gen_test_for_one_feature(llm: LLM, output_dir: Path, feature: str):

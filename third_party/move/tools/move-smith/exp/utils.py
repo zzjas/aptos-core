@@ -51,7 +51,7 @@ def fix_code(llm: LLM, wrong_code: str, errmsg: str):
     ]
 
 
-def check_compile(llm: LLM, check_dir: Path):
+def check_compile(llm: LLM, check_dir: Path, fix=False):
     log.info(f"Checking all packages in {check_dir}")
 
     all_packges = [m.parent for m in check_dir.rglob("Move.toml")]
@@ -71,6 +71,8 @@ def check_compile(llm: LLM, check_dir: Path):
                 ok += 1
                 break
             log.error(f"Compilation failed for {package}: {result.returncode}")
+            if not fix:
+                break
             log.error(result.stdout.decode())
             log.error(result.stderr.decode())
             log.info(f"Trying to fix: iteration {i + 1}")
@@ -92,11 +94,14 @@ def check_transactional(check_dir: Path):
     all_moves = [m for m in check_dir.rglob("sources/*.move")]
     total = 0
     ok = 0
-    for move_file in track(all_moves, description=""):
+    for move_file in track(
+        all_moves, description="Running transactional tests..."
+    ):
         total += 1
         result = run_transactional(move_file)
         if result.returncode == 0:
             ok += 1
         else:
-            log.error(f"Transaction test failed: {move_file}")
+            log.error("Transaction test failed:")
+            print(move_file)
     log.info(f"Checked {total} files, {ok} runs successfully")
