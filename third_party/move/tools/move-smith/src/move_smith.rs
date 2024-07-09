@@ -256,6 +256,11 @@ impl MoveSmith {
             name,
             functions,
             structs,
+            constants: vec![Constant {
+                name: Identifier::new_str("ADDR", IDKinds::Var),
+                typ: Type::Address,
+                value: Expression::AddressLiteral("@0xBEEF".to_string()),
+            }],
         })
     }
 
@@ -315,6 +320,18 @@ impl MoveSmith {
 
         let mut runners = Vec::new();
         for i in 0..self.config.borrow().num_runs_per_func {
+            let sref_dec = Statement::Decl(Declaration {
+                name: self.env().type_pool.get_signer_ref_var(),
+                typ: Type::Ref(Box::new(Type::Signer)),
+                value: Some(Expression::Reference(Box::new(Expression::Variable(
+                    VariableAccess {
+                        name: self.env().type_pool.get_signer_var(),
+                        copy: false,
+                    },
+                )))),
+                emit_type: false,
+            });
+
             // Generate a call to the target function
             let call = Expression::FunctionCall(self.generate_call_to_function(
                 u,
@@ -334,11 +351,11 @@ impl MoveSmith {
             // Generate a body with only one statement/return expr
             let body = match new_ret.is_none() {
                 true => Block {
-                    stmts: vec![Statement::Expr(call)],
+                    stmts: vec![sref_dec, Statement::Expr(call)],
                     return_expr: None,
                 },
                 false => Block {
-                    stmts: Vec::new(),
+                    stmts: vec![sref_dec],
                     return_expr: Some(call),
                 },
             };
@@ -354,7 +371,7 @@ impl MoveSmith {
                         format!("{}_runner_{}", signature.name.name, i),
                         IDKinds::Function,
                     ),
-                    parameters: Vec::new(),
+                    parameters: vec![(self.env().type_pool.get_signer_var(), Type::Signer)],
                     return_type: new_ret,
                 },
                 visibility: Visibility { public: true },
@@ -667,7 +684,11 @@ impl MoveSmith {
         }
 
         let num_params = u.int_in_range(0..=self.config.borrow().max_num_params_in_func)?;
-        let mut parameters = Vec::new();
+        let mut parameters = vec![(
+            self.env().type_pool.get_signer_ref_var(),
+            Type::Ref(Box::new(Type::Signer)),
+        )];
+
         for _ in 0..num_params {
             let (name, _) = self.get_next_identifier(IDKinds::Var, parent_scope);
             let typ = self.get_random_type(u, parent_scope, true, false, true, false, true)?;
@@ -1240,6 +1261,13 @@ impl MoveSmith {
         // Check for reference types
         match typ {
             Type::Ref(inner) => {
+                if let Type::Signer = inner.as_ref() {
+                    return Ok(Expression::Variable(VariableAccess {
+                        name: self.env().type_pool.get_signer_ref_var(),
+                        copy: false,
+                    }));
+                }
+
                 return Ok(Expression::Reference(Box::new(
                     self.generate_expression_of_type(
                         u,
@@ -1260,6 +1288,12 @@ impl MoveSmith {
                         allow_call,
                     )?,
                 )));
+            },
+            Type::Address => {
+                return Ok(Expression::Variable(VariableAccess {
+                    name: self.env().type_pool.get_address_var(),
+                    copy: false,
+                }))
             },
             _ => (),
         }
