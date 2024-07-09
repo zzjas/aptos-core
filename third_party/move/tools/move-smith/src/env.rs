@@ -15,6 +15,7 @@ use std::collections::{BTreeMap, BTreeSet};
 /// The meta store for all the information during generation
 #[derive(Debug)]
 pub struct Env {
+    pub config: Config,
     pub id_pool: IdentifierPool,
     pub type_pool: TypePool,
 
@@ -35,6 +36,12 @@ pub struct Env {
     /// Timeout
     start_time: std::time::Instant,
     timeout: std::time::Duration,
+
+    /// Inline function counter
+    inline_func_counter: usize,
+
+    /// Number of fields that has type of another struct
+    struct_type_field_counter: usize,
 }
 
 /// NOTE: This is unused for now to avoid the situation where the fuzzer cannot
@@ -102,6 +109,7 @@ impl Env {
     /// Create a new environment with the given configuration
     pub fn new(config: &Config) -> Self {
         Self {
+            config: config.clone(),
             id_pool: IdentifierPool::new(),
             type_pool: TypePool::new(),
 
@@ -116,6 +124,9 @@ impl Env {
 
             start_time: std::time::Instant::now(),
             timeout: std::time::Duration::from_secs(config.generation_timeout_sec as u64),
+
+            inline_func_counter: 0,
+            struct_type_field_counter: 0,
         }
     }
 
@@ -253,5 +264,25 @@ impl Env {
     #[inline]
     pub fn reached_type_depth_limit(&self) -> bool {
         self.type_depth >= self.max_expr_depth
+    }
+
+    #[inline]
+    pub fn inc_inline_func_counter(&mut self) {
+        self.inline_func_counter += 1;
+    }
+
+    #[inline]
+    pub fn reached_inline_function_limit(&self) -> bool {
+        self.inline_func_counter >= self.config.max_num_inline_funcs
+    }
+
+    #[inline]
+    pub fn inc_struct_type_field_counter(&mut self) {
+        self.struct_type_field_counter += 1;
+    }
+
+    #[inline]
+    pub fn reached_struct_type_field_limit(&self) -> bool {
+        self.struct_type_field_counter >= self.config.max_num_fields_of_struct_type
     }
 }

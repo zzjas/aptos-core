@@ -18,12 +18,17 @@ pub struct Config {
 
     /// The number of `//# run 0xCAFE::ModuleX::funX` to invoke
     pub num_runs_per_func: usize,
+    /// The number of functions that can have `inline`
+    pub max_num_inline_funcs: usize,
 
     pub max_num_modules: usize,
     pub max_num_functions_in_module: usize,
     pub max_num_structs_in_module: usize,
 
     pub max_num_fields_in_struct: usize,
+    /// The maximum total number of fields in all structs that can have
+    /// type of another struct
+    pub max_num_fields_of_struct_type: usize,
 
     pub max_num_stmts_in_func: usize,
     pub max_num_params_in_func: usize,
@@ -86,12 +91,14 @@ impl Default for Config {
             ],
 
             num_runs_per_func: 3,
+            max_num_inline_funcs: 1,
 
             max_num_modules: 1,
             max_num_functions_in_module: 8,
             max_num_structs_in_module: 5,
 
             max_num_fields_in_struct: 5,
+            max_num_fields_of_struct_type: 3,
 
             max_num_stmts_in_func: 5,
             max_num_params_in_func: 7,
