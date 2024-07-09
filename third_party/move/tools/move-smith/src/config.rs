@@ -64,7 +64,7 @@ impl Default for Config {
                 "incompatible types".to_string(),
                 "recursion during function inlining".to_string(),
                 "still mutably borrowed".to_string(),
-                "known issue".to_string(),
+                "MOVELOC_EXISTS_BORROW_ERROR".to_string(),
             ],
 
             experiment_combos: vec![
