@@ -33,7 +33,7 @@ pub struct Module {
     pub name: Identifier,
     pub functions: Vec<RefCell<Function>>,
     pub structs: Vec<RefCell<StructDefinition>>,
-    // pub constants: Vec<Constant>,
+    pub constants: Vec<Constant>,
 }
 
 /// A simplified Move Script.
@@ -137,6 +137,7 @@ pub struct Declaration {
 /// An expression.
 #[derive(Debug, Clone)]
 pub enum Expression {
+    AddressLiteral(String),
     NumberLiteral(NumberLiteral),
     Variable(VariableAccess),
     Boolean(bool),
@@ -241,4 +242,11 @@ pub struct FunctionCall {
     pub name: Identifier,
     pub type_args: TypeArgs,
     pub args: Vec<Expression>,
+}
+/// A constant
+#[derive(Debug, Clone)]
+pub struct Constant {
+    pub typ: Type,
+    pub name: Identifier,
+    pub value: Expression,
 }

@@ -41,6 +41,7 @@ fn simple_module() -> Module {
             }),
         })],
         structs: Vec::new(),
+        constants: Vec::new(),
     }
 }
 
