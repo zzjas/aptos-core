@@ -176,17 +176,28 @@ impl MoveSmith {
 
     pub fn post_process_function(
         &self,
-        _u: &mut Unstructured,
+        u: &mut Unstructured,
         function: &RefCell<Function>,
     ) -> Result<()> {
         if function.borrow().body.is_none() {
             return Ok(());
         }
-        let body_code = function.borrow().body.as_ref().unwrap().inline();
-        let self_name = function.borrow().signature.name.inline();
 
+        let self_name = function.borrow().signature.name.inline();
+        if self_name.contains("runner") {
+            return Ok(());
+        }
+
+        let body_code = function.borrow().body.as_ref().unwrap().inline();
+
+        // If a function calls itself, we cnanot inline it
         if body_code.contains(&self_name) {
             function.borrow_mut().signature.inline = false;
+        } else if !self.env().reached_inline_function_limit() {
+            if bool::arbitrary(u)? {
+                function.borrow_mut().signature.inline = true;
+                self.env_mut().inc_inline_func_counter();
+            }
         }
         Ok(())
     }
@@ -452,6 +463,19 @@ impl MoveSmith {
                     },
                     // Use another struct as the field
                     2 => {
+                        // We can no longer generate struct types if we reach the limit
+                        if self.env().reached_struct_type_field_limit() {
+                            break self.get_random_type(
+                                u,
+                                &struct_scope,
+                                true,
+                                false,
+                                false,
+                                false,
+                                false,
+                            )?;
+                        }
+
                         // Get all structs in scope and satisfy the ability requirements
                         let candidates = self.get_usable_struct_type(
                             st.borrow().abilities.clone(),
@@ -481,6 +505,7 @@ impl MoveSmith {
                             if let Type::StructConcrete(_) = &new_typ {
                                 // Check if we create a cyclic data type
                                 if !self.check_struct_reachable(&new_typ, &st.borrow().name, None) {
+                                    self.env_mut().inc_struct_type_field_counter();
                                     break new_typ;
                                 }
                             }
@@ -722,12 +747,8 @@ impl MoveSmith {
             }
         }
 
-        // 20% chance we label a function as inline
-        // Inline functions can make compilation super slow so we don't want too many of them
-        let inline = u.int_in_range(0..=10)? > 8;
-
         Ok(FunctionSignature {
-            inline,
+            inline: false,
             type_parameters: TypeParameters { type_parameters },
             name,
             parameters,
