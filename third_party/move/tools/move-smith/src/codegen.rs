@@ -124,11 +124,14 @@ impl CodeGenerator for Script {
 impl CodeGenerator for Module {
     fn emit_code_lines(&self) -> Vec<String> {
         // The `//# publish` is for the transactional test
-        // TODO: remove the hardcoded address
         let mut code = vec![
             "//# publish".to_string(),
             format!("module 0xCAFE::{} {{", self.name.emit_code()),
         ];
+
+        for c in &self.constants {
+            append_code_lines_with_indentation(&mut code, c.emit_code_lines(), INDENTATION_SIZE);
+        }
 
         for s in &self.structs {
             append_code_lines_with_indentation(
@@ -329,6 +332,7 @@ impl CodeGenerator for Declaration {
 impl CodeGenerator for Expression {
     fn emit_code_lines(&self) -> Vec<String> {
         match self {
+            Expression::AddressLiteral(addr) => vec![addr.clone()],
             Expression::NumberLiteral(n) => n.emit_code_lines(),
             Expression::Variable(ident) => ident.emit_code_lines(),
             Expression::Boolean(b) => vec![b.to_string()],
@@ -553,6 +557,8 @@ impl CodeGenerator for Type {
             T::Struct(st) => st.name.inline(),
             T::StructConcrete(st) => st.inline(),
             T::TypeParameter(tp) => tp.name.inline(),
+            T::Address => "address".to_string(),
+            T::Signer => "signer".to_string(),
             _ => unimplemented!(),
         }]
     }
@@ -562,5 +568,16 @@ impl CodeGenerator for StructTypeConcrete {
     fn emit_code_lines(&self) -> Vec<String> {
         let type_args = self.type_args.inline();
         vec![format!("{}{}", self.name.emit_code(), type_args)]
+    }
+}
+
+impl CodeGenerator for Constant {
+    fn emit_code_lines(&self) -> Vec<String> {
+        vec![format!(
+            "const {}: {} = {};",
+            self.name.emit_code(),
+            self.typ.emit_code(),
+            self.value.inline()
+        )]
     }
 }

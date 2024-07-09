@@ -295,4 +295,16 @@ impl TypePool {
             None
         }
     }
+
+    pub fn get_signer_var(&self) -> Identifier {
+        Identifier::new_str("s", IDKind::Var)
+    }
+
+    pub fn get_signer_ref_var(&self) -> Identifier {
+        Identifier::new_str("sref", IDKind::Var)
+    }
+
+    pub fn get_address_var(&self) -> Identifier {
+        Identifier::new_str("ADDR", IDKind::Constant)
+    }
 }
