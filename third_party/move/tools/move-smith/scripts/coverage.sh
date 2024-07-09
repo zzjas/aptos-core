@@ -46,6 +46,7 @@ function generate_coverage() {
     echo "ASAN flag: $asan_flag" | tee -a $log_file
     echo "Collecting coverage data for $fuzz_target"
     export RUSTFLAGS="$RUSTFLAGS -Zcoverage-options=branch"
+
     cargo fuzz coverage $asan_flag $fuzz_target $corpus_dir -- -rss_limit_mb=10240 -timeout=20
 
     fuzz_target_bin=$(find target/*/coverage -name $fuzz_target -type f)
