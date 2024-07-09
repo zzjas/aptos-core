@@ -87,7 +87,7 @@ def sort_directories_by_date(fpaths):
 
 def make_plot(results, names, component: str):
     pass
-    plt.figure(figsize=(10, 9))
+    plt.figure(figsize=(12, 11))
     plt.xlabel("Runs")
     plt.ylabel("Percentage")
     plt.title(f"{component}")
@@ -98,7 +98,7 @@ def make_plot(results, names, component: str):
         for r in results:
             data.append((r[component][f][0] / r[component][f][1]) * 100)
         plt.plot(names, data, marker="o", linestyle="-", label=f)
-    plt.xticks(rotation=45)
+    plt.xticks(rotation=30)
     plt.legend()
     OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
     plt.savefig(OUTPUT_DIR / f"{component.split("/")[0]}.svg")
