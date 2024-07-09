@@ -10941,6 +10941,7 @@ dependencies = [
  "arbitrary",
  "libfuzzer-sys",
  "move-smith",
+ "once_cell",
  "rand 0.7.3",
 ]
 

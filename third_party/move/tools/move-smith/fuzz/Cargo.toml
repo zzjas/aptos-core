@@ -13,6 +13,7 @@ arbitrary = { workspace = true }
 libfuzzer-sys = { workspace = true }
 move-smith = { path = ".." }
 rand = { workspace = true }
+once_cell = { workspace = true }
 
 [[bin]]
 name = "compile_only"
