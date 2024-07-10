@@ -70,6 +70,7 @@ impl Default for Config {
                 "recursion during function inlining".to_string(),
                 "still mutably borrowed".to_string(),
                 "MOVELOC_EXISTS_BORROW_ERROR".to_string(),
+                "STLOC_UNSAFE_TO_DESTROY_ERROR".to_string(),
             ],
 
             experiment_combos: vec![
