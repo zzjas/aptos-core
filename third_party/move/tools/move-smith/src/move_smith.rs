@@ -1285,7 +1285,8 @@ impl MoveSmith {
         };
         trace!("Concretized type is: {:?}", typ);
 
-        // Check for reference types
+        // Check for `&signer` and `address` types
+        // We hardcode these two types
         match typ {
             Type::Ref(inner) => {
                 if let Type::Signer = inner.as_ref() {
@@ -1294,27 +1295,6 @@ impl MoveSmith {
                         copy: false,
                     }));
                 }
-
-                return Ok(Expression::Reference(Box::new(
-                    self.generate_expression_of_type(
-                        u,
-                        parent_scope,
-                        inner,
-                        allow_var,
-                        allow_call,
-                    )?,
-                )));
-            },
-            Type::MutRef(inner) => {
-                return Ok(Expression::MutReference(Box::new(
-                    self.generate_expression_of_type(
-                        u,
-                        parent_scope,
-                        inner,
-                        allow_var,
-                        allow_call,
-                    )?,
-                )));
             },
             Type::Address => {
                 return Ok(Expression::Variable(VariableAccess {
@@ -1373,6 +1353,9 @@ impl MoveSmith {
                     None
                 }
             },
+            // We handle references separately after checking for variables
+            Type::Ref(_) => None,
+            Type::MutRef(_) => None,
             _ => unimplemented!(),
         };
 
@@ -1391,6 +1374,40 @@ impl MoveSmith {
                 let expr = Expression::Variable(va);
                 default_choices.push(expr.clone());
                 choices.push(expr);
+            }
+        }
+
+        // If the default choice is empty here, it means we are working on a
+        // reference type but cannot find a variable for it.
+        if default_choices.is_empty() {
+            trace!(
+                "No default choices for type: {} <-- should be a ref",
+                typ.inline()
+            );
+            let ref_expr = match typ {
+                Type::Ref(inner) => Some(Expression::Reference(Box::new(
+                    self.generate_expression_of_type(
+                        u,
+                        parent_scope,
+                        inner,
+                        allow_var,
+                        allow_call,
+                    )?,
+                ))),
+                Type::MutRef(inner) => Some(Expression::MutReference(Box::new(
+                    self.generate_expression_of_type(
+                        u,
+                        parent_scope,
+                        inner,
+                        allow_var,
+                        allow_call,
+                    )?,
+                ))),
+                _ => None,
+            };
+            if let Some(e) = ref_expr {
+                default_choices.push(e.clone());
+                choices.push(e);
             }
         }
 
@@ -1419,11 +1436,19 @@ impl MoveSmith {
             false => 0,
         };
 
+        // Since we cannot have ref to ref, we cannot use a deref to get a ref
+        // i.e. here if we want a `u8`, deref can give us `*(var1)` if `var1` is `&u8`
+        // but we cannot get `&u8` from deref
+        let deref_weight = match typ.is_some_ref() {
+            true => 0,
+            false => 2,
+        };
+
         let weights = vec![
             2,                // If-Else
             func_call_weight, // FunctionCall
             binop_weight,     // BinaryOperation
-            2,                // Dereference
+            deref_weight,     // Dereference
         ];
 
         let idx = choose_idx_weighted(u, &weights)?;
