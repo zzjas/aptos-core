@@ -1067,9 +1067,27 @@ where
                     .parse()
                     .unwrap_or(0u64);
                 all_gas_usage.push(gas_used);
-            } else {
+                continue;
+            } else if line.contains("failed with VMError") {
+                new_output.push_str("VMError")
+            } else if line.contains("major_status: ") || line.contains("sub_status: ") {
+                let status = line
+                    .split(":")
+                    .collect::<Vec<&str>>()
+                    .get(1)
+                    .unwrap()
+                    .trim()
+                    .replacen(",", "", 1);
+                new_output.push_str(&format!(" -- {}", status))
+            } else if line.starts_with("}") {
+                new_output.push('\n');
+            } else if !(line.contains("location: ")
+                || line.contains("indices: ")
+                || line.contains("offsets: ")
+                || line.starts_with("}"))
+            {
                 new_output.push_str(line);
-                new_output.push_str("\n");
+                new_output.push('\n');
             }
         }
         let original_output = output.clone();
@@ -1088,7 +1106,7 @@ where
 
         // If there is a previous output, compare to that one
         if !last_output.is_empty() && last_output != output {
-            let diff = format_diff_no_color(&last_output, &output);
+            let diff = format!("V1 Result:\n{}\nV2 Result:\n{}", last_output, output);
             let output = format!("comparison between v1 and v2 failed:\n{}", diff);
             handle_expected_output(path, output, exp_suffix)?;
             return Ok(());
