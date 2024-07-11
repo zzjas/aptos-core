@@ -71,6 +71,8 @@ impl Default for Config {
                 "still mutably borrowed".to_string(),
                 "MOVELOC_EXISTS_BORROW_ERROR".to_string(),
                 "STLOC_UNSAFE_TO_DESTROY_ERROR".to_string(),
+                "mutable ownership violated".to_string(),
+                "ambiguous usage of variable".to_string(),
             ],
 
             experiment_combos: vec![

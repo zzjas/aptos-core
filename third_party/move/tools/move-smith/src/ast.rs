@@ -73,6 +73,7 @@ pub struct FunctionSignature {
 /// An expression block
 #[derive(Debug, Clone)]
 pub struct Block {
+    pub name: Identifier,
     pub stmts: Vec<Statement>,
     pub return_expr: Option<Expression>,
 }

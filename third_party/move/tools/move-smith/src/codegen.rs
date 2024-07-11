@@ -105,6 +105,7 @@ impl CodeGenerator for Script {
             visibility: Visibility { public: false },
             // Hardcode one function to simplify the output
             body: Some(Block {
+                name: Identifier::new_str("_block_script", IDKind::Block),
                 stmts: self
                     .main
                     .iter()
@@ -280,7 +281,7 @@ impl CodeGenerator for Block {
         if self.stmts.is_empty() && self.return_expr.is_none() {
             return vec!["{}".to_string()];
         }
-        let mut code = vec!["{".to_string()];
+        let mut code = vec![format!("{{ /* {} */", self.name.inline())];
 
         let mut body = Vec::new();
         for stmt in &self.stmts {

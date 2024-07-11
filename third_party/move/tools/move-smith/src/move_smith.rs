@@ -362,10 +362,12 @@ impl MoveSmith {
             // Generate a body with only one statement/return expr
             let body = match new_ret.is_none() {
                 true => Block {
+                    name: Identifier::new_str("_block_runner", IDKinds::Block),
                     stmts: vec![sref_dec, Statement::Expr(call)],
                     return_expr: None,
                 },
                 false => Block {
+                    name: Identifier::new_str("_block_runner", IDKinds::Block),
                     stmts: vec![sref_dec],
                     return_expr: Some(call),
                 },
@@ -822,7 +824,7 @@ impl MoveSmith {
             parent_scope,
             self.env().curr_expr_depth()
         );
-        let (_, block_scope) = self.get_next_identifier(IDKinds::Block, parent_scope);
+        let (name, block_scope) = self.get_next_identifier(IDKinds::Block, parent_scope);
         trace!("Created block scope: {:?}", block_scope);
 
         let reach_limit = self.env().will_reached_expr_depth_limit(1);
@@ -839,7 +841,11 @@ impl MoveSmith {
             None => None,
         };
         trace!("Done generating block: {:?}", block_scope);
-        Ok(Block { stmts, return_expr })
+        Ok(Block {
+            name,
+            stmts,
+            return_expr,
+        })
     }
 
     /// Generate a return expression
