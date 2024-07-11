@@ -72,7 +72,7 @@ fn main() {
         println!("Generated MoveSmith instance with {} bytes", buffer_size);
 
         let file_name = format!("Output_{}.move", i);
-        let file_path = match args.package {
+        let (file_path, buffer_file_path) = match args.package {
             true => {
                 let package_dir = args.output_dir.join(format!("Package_{}", i));
                 let source_dir = package_dir.join("sources");
@@ -81,11 +81,15 @@ fn main() {
                 let move_toml_path = package_dir.join("Move.toml");
                 fs::write(&move_toml_path, MOVE_TOML_TEMPLATE).expect("Failed to write Move.toml");
                 // Write the Move source code
-                source_dir.join(file_name)
+                (source_dir.join(file_name), package_dir.join("buffer.raw"))
             },
-            false => args.output_dir.join(file_name),
+            false => (
+                args.output_dir.join(file_name),
+                args.output_dir.join(format!("buffer_{}.raw", i)),
+            ),
         };
-        fs::write(&file_path, code).expect("Failed to write file");
+        fs::write(&file_path, code).expect("Failed to write the Move file");
+        fs::write(&buffer_file_path, buffer).expect("Failed to write the raw buffer file");
     }
 
     let output_format = if args.package { "packages" } else { "files" };

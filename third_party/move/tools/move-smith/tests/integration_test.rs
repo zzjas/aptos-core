@@ -30,6 +30,7 @@ fn simple_module() -> Module {
             },
             visibility: Visibility { public: true },
             body: Some(Block {
+                name: Identifier::new_str("_block0", IDKind::Function),
                 stmts: vec![Statement::Expr(Expression::NumberLiteral(NumberLiteral {
                     value: BigUint::from(42u32),
                     typ: Type::U32,
@@ -81,7 +82,7 @@ fn test_emit_code() {
     assert_eq!(lines[1], "module 0xCAFE::SimpleModule {");
     assert_eq!(
         lines[2],
-        "    public fun fun1(param1: u64, param2: u8): u32 {"
+        "    public fun fun1(param1: u64, param2: u8): u32 { /* _block0 */"
     );
     assert_eq!(lines[3], "        42u32;");
     assert_eq!(lines[4], "        111u32");

@@ -8,6 +8,7 @@ use move_smith::{utils::raw_to_compile_unit, CodeGenerator};
 use std::io::{self, Read, Write};
 
 fn main() -> io::Result<()> {
+    env_logger::init();
     let mut buffer = Vec::new();
     io::stdin().read_to_end(&mut buffer)?;
 
