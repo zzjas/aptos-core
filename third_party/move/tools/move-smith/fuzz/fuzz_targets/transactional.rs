@@ -50,6 +50,7 @@ fuzz_target!(|data: &[u8]| {
             TransactionalResult::WarningsOnly => "WarningsOnly",
             TransactionalResult::IgnoredErr(_) => "IgnoredErr",
             TransactionalResult::Err(_) => "Err",
+            TransactionalResult::GasDiffTooLarge(_) => "GasDiffTooLarge",
         };
         profile_s.push_str(&format!("move-smith-profile::status::{}\n", status));
 

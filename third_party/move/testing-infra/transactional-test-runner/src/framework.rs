@@ -1005,6 +1005,7 @@ where
         (vec![config.clone()], false) // either V1 or V2
     };
     let mut last_output = String::new();
+    let mut last_gas_usage = vec![];
     let mut bytecode_print_output = BTreeMap::<TestRunConfig, String>::new();
     for run_config in runs {
         let mut output = String::new();
@@ -1053,6 +1054,27 @@ where
         for task in tasks {
             handle_known_task(&mut output, &mut adapter, task);
         }
+
+        let mut all_gas_usage = vec![];
+        let mut new_output = String::new();
+        for line in output.lines() {
+            if line.contains("Gas used") {
+                let parse_parts = line.split("|").collect::<Vec<&str>>();
+                let gas_used = parse_parts
+                    .get(1 as usize)
+                    .unwrap_or(&"0")
+                    .trim()
+                    .parse()
+                    .unwrap_or(0u64);
+                all_gas_usage.push(gas_used);
+            } else {
+                new_output.push_str(line);
+                new_output.push_str("\n");
+            }
+        }
+        let original_output = output.clone();
+        output = new_output;
+
         // Extract any bytecode outputs, they should not be part of the diff.
         static BYTECODE_REX: Lazy<Regex> = Lazy::new(|| {
             Regex::new("(?m)== BEGIN Bytecode ==(.|\n|\r)*== END Bytecode ==").unwrap()
@@ -1071,6 +1093,12 @@ where
             handle_expected_output(path, output, exp_suffix)?;
             return Ok(());
         }
+
+        if !last_gas_usage.is_empty() && matches!(config, TestRunConfig::ComparisonV1V2 { .. }) {
+            handle_gas_diff_check(original_output, &last_gas_usage, &all_gas_usage, 1.0)?;
+        }
+
+        last_gas_usage = all_gas_usage;
         last_output = output
     }
     if matches!(config, TestRunConfig::ComparisonV1V2 { .. }) {
@@ -1127,6 +1155,35 @@ fn handle_known_task<'a, Adapter: MoveTestAdapter<'a>>(
         task_number, task_name, start_line, stop_line, result_string
     )
     .unwrap();
+}
+
+fn handle_gas_diff_check(
+    original_output: String,
+    last_gas_usage: &Vec<u64>,
+    curr_gas_usage: &Vec<u64>,
+    gas_diff_threshold: f64,
+) -> Result<()> {
+    assert!(last_gas_usage.len() == curr_gas_usage.len());
+    for i in 0..last_gas_usage.len() {
+        let curr = curr_gas_usage[i] as f64;
+        // Ignore small gas usage
+        if curr <= 10.0 {
+            continue;
+        }
+        let upper = last_gas_usage[i] as f64 * (1.0 + gas_diff_threshold);
+        if curr > upper {
+            let output = format!(
+                "Gas comparison failed: gas usage differs more than {:.1}% for task#{}, V1 used {} gas, V2 used {} gas.\n{}",
+                gas_diff_threshold * 100.0,
+                i + 1,
+                last_gas_usage[i],
+                curr,
+                original_output,
+            );
+            anyhow::bail!(output)
+        }
+    }
+    Ok(())
 }
 
 fn handle_expected_output(

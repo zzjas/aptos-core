@@ -38,6 +38,8 @@ pub enum TransactionalResult {
     IgnoredErr(String),
     // The test framework reported an error
     Err(String),
+    // Too much gas difference
+    GasDiffTooLarge(String),
 }
 
 impl TransactionalResult {
@@ -50,7 +52,12 @@ impl TransactionalResult {
                 info!("Ignored error: {}", msg);
             },
             TransactionalResult::Err(msg) => {
-                panic!("Unwrapping transactional test error: {}", msg);
+                error!("Unwrapping transactional test error: {}", msg);
+                std::process::exit(1);
+            },
+            TransactionalResult::GasDiffTooLarge(msg) => {
+                error!("Gas difference too large: {}", msg);
+                std::process::exit(1);
             },
         }
     }
@@ -72,6 +79,9 @@ impl fmt::Display for TransactionalResult {
                 write!(f, "Transactional test passed with errors ignored: {}", msg)
             },
             TransactionalResult::Err(msg) => write!(f, "Transactional test failed: {}", msg),
+            TransactionalResult::GasDiffTooLarge(msg) => {
+                write!(f, "Transactional test failed (gas diff): {}", msg)
+            },
         }
     }
 }
@@ -282,6 +292,9 @@ fn process_transactional_test_result(
     }
     let err = result.unwrap_err();
     let msg = format!("{}", err);
+    if msg.contains("Gas comparison failed") {
+        return TransactionalResult::GasDiffTooLarge(msg);
+    }
     for ignore in ignores.iter() {
         if msg.contains(ignore) {
             return TransactionalResult::IgnoredErr(msg);

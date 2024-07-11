@@ -24,7 +24,5 @@ fn main() {
     let elapsed = start.elapsed();
     println!("Elapsed time: {}s", elapsed.as_millis() / 1000);
     println!("{}", result);
-    if result.is_err() {
-        std::process::exit(1);
-    }
+    result.unwrap();
 }

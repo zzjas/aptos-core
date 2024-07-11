@@ -313,27 +313,33 @@ impl<'a> MoveTestAdapter<'a> for SimpleVMTestAdapter<'a> {
         let verbose = extra_args.verbose;
         let traversal_storage = TraversalStorage::new();
 
-        let serialized_return_values = self
-            .perform_session_action(gas_budget, |session, gas_status| {
-                session.execute_function_bypass_visibility(
+        let (serialized_return_values, gas_used) =
+            self.perform_session_action(gas_budget, |session, gas_status| {
+                let result = session.execute_function_bypass_visibility(
                     module,
                     function,
                     type_args,
                     args,
                     gas_status,
                     &mut TraversalContext::new(&traversal_storage),
-                )
-            })
-            .map_err(|vm_error| {
-                anyhow!(
-                    "Function execution failed with VMError: {}",
-                    vm_error.format_test_output(
-                        move_test_debug() || verbose,
-                        !move_test_debug() && self.comparison_mode
-                    )
-                )
+                );
+                let gas_used: u64 = match gas_budget {
+                    Some(budget) => budget - u64::from(gas_status.remaining_gas()),
+                    None => 0u64,
+                };
+                Ok((result, gas_used))
             })?;
-        Ok((None, serialized_return_values))
+        let serialized_return_values = serialized_return_values.map_err(|vm_error| {
+            anyhow!(
+                "Function execution failed with VMError: {}",
+                vm_error.format_test_output(
+                    move_test_debug() || verbose,
+                    !move_test_debug() && self.comparison_mode
+                )
+            )
+        })?;
+        let gas_report = format!("Gas used | {} |\n", gas_used);
+        Ok((Some(gas_report), serialized_return_values))
     }
 
     fn view_data(
