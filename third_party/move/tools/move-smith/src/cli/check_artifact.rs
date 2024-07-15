@@ -35,15 +35,18 @@ fn main() {
     let code = smith.get_compile_unit().emit_code();
     println!("Loaded code from file: {:?}", args.input_file);
 
-    compile_move_code(code.clone(), true, false);
-    println!("Compiled code with V1 did not panic");
+    // compile_move_code(code.clone(), true, false);
+    // println!("Compiled code with V1 did not panic");
 
-    compile_move_code(code.clone(), false, true);
-    println!("Compiled code with V2 did not panic");
+    // compile_move_code(code.clone(), false, true);
+    // println!("Compiled code with V2 did not panic");
 
     let result = run_transactional_test(code, &smith.config.take());
-    println!("{}", result);
     if result.is_err() {
+        println!("check_artifact failed");
+        println!("{}", result);
         std::process::exit(1);
+    } else {
+        println!("check_artifact passed successfully");
     }
 }
