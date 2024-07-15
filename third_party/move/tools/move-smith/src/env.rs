@@ -295,8 +295,12 @@ impl Env {
         self.curr_acquires.insert(ty.get_name(), scope.clone());
     }
 
-    pub fn record_acquires(&mut self, new_acquires: BTreeMap<Identifier, Scope>) {
-        self.curr_acquires.extend(new_acquires);
+    pub fn record_acquires(&mut self, new_acquires: BTreeMap<Identifier, Scope>, scope: &Scope) {
+        println!("searchme: before extend: {:?}", self.curr_acquires);
+        for (k, v) in new_acquires {
+            self.curr_acquires.insert(k, scope.clone());
+        }
+        println!("searchme: after extend: {:?}", self.curr_acquires);
     }
 
     pub fn get_and_clean_curr_acquires(&mut self) -> BTreeMap<Identifier, Scope> {
