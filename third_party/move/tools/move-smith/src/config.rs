@@ -73,6 +73,12 @@ impl Default for Config {
                 "STLOC_UNSAFE_TO_DESTROY_ERROR".to_string(),
                 "mutable ownership violated".to_string(),
                 "ambiguous usage of variable".to_string(),
+                "cannot assign to borrowed local".to_string(),
+                "requires exclusive access but is borrowed".to_string(),
+                "cannot implicitly freeze local".to_string(),
+                "same mutable reference in value is also used".to_string(),
+                "could create dangling a reference".to_string(),
+                "referential transparency violated".to_string(),
             ],
 
             experiment_combos: vec![
