@@ -34,7 +34,7 @@ use log::{info, trace, warn};
 use num_bigint::BigUint;
 use std::{
     cell::{Ref, RefCell, RefMut},
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
 };
 
 /// Keeps track of the generation state.
@@ -124,6 +124,10 @@ impl MoveSmith {
 
         self.post_process(u)?;
 
+        for m in self.modules.iter() {
+            self.add_runners(u, m)?;
+        }
+
         Ok(())
     }
 
@@ -199,6 +203,12 @@ impl MoveSmith {
                 self.env_mut().inc_inline_func_counter();
             }
         }
+
+        function.borrow_mut().signature.acquires.retain(|k, v| {
+            let pieces = v.to_pieces();
+            let block_name = pieces.last().unwrap();
+            body_code.contains(block_name)
+        });
         Ok(())
     }
 
@@ -287,10 +297,14 @@ impl MoveSmith {
         }
 
         // Generate function bodies and runners
-        for f in module.borrow().functions.iter() {
+        for f in module.borrow().functions.iter().rev() {
             self.fill_function(u, f)?;
         }
 
+        Ok(())
+    }
+
+    fn add_runners(&self, u: &mut Unstructured, module: &RefCell<Module>) -> Result<()> {
         trace!("Generating runners for module: {:?}", module.borrow().name);
         // For runners, we don't want complex expressions to reduce input
         // consumption and to avoid wasting mutation
@@ -386,6 +400,7 @@ impl MoveSmith {
                     ),
                     parameters: vec![(self.env().type_pool.get_signer_var(), Type::Signer)],
                     return_type: new_ret,
+                    acquires: signature.acquires.clone(),
                 },
                 visibility: Visibility { public: true },
                 body: Some(body),
@@ -681,6 +696,8 @@ impl MoveSmith {
         }
 
         let body = self.generate_block(u, &scope, None, signature.return_type.clone())?;
+        let acquires = self.env_mut().get_and_clean_curr_acquires();
+        function.borrow_mut().signature.acquires = acquires;
         function.borrow_mut().body = Some(body);
         Ok(())
     }
@@ -755,6 +772,7 @@ impl MoveSmith {
             name,
             parameters,
             return_type,
+            acquires: BTreeMap::new(),
         })
     }
 
@@ -882,11 +900,99 @@ impl MoveSmith {
 
     /// Generate a random statement.
     fn generate_statement(&self, u: &mut Unstructured, parent_scope: &Scope) -> Result<Statement> {
-        match u.int_in_range(0..=1)? {
+        let weights = vec![6, 4, 2];
+        let idx = choose_idx_weighted(u, &weights)?;
+        match idx {
             0 => Ok(Statement::Decl(self.generate_declaration(u, parent_scope)?)),
             1 => Ok(Statement::Expr(self.generate_expression(u, parent_scope)?)),
+            2 => Ok(Statement::Resource(
+                self.generate_resource_operation(u, parent_scope)?,
+            )),
             _ => panic!("Invalid statement type"),
         }
+    }
+
+    fn generate_resource_operation(
+        &self,
+        u: &mut Unstructured,
+        parent_scope: &Scope,
+    ) -> Result<ResourceOperation> {
+        use ResourceOperationKind as RK;
+        let kind = RK::arbitrary(u)?;
+
+        let name = match kind {
+            // Only move_to does not return a value
+            RK::MoveTo => None,
+            _ => {
+                let (name, _) = self.get_next_identifier(IDKinds::Var, parent_scope);
+                self.env_mut().live_vars.mark_alive(parent_scope, &name);
+
+                Some(name)
+            },
+        };
+
+        let addr = match kind {
+            // Only move_to does not require an address
+            RK::MoveTo => None,
+            _ => Some(self.generate_expression_of_type(
+                u,
+                parent_scope,
+                &Type::Address,
+                true,
+                false,
+            )?),
+        };
+
+        let signer = match kind {
+            RK::MoveTo => Some(self.generate_expression_of_type(
+                u,
+                parent_scope,
+                &Type::Ref(Box::new(Type::Signer)),
+                true,
+                false,
+            )?),
+            _ => None,
+        };
+
+        let typs = self.get_types_with_abilities(parent_scope, &vec![Ability::Key], true);
+        let typ = u.choose(&typs)?.clone();
+        assert!(!typ.is_some_ref());
+
+        // Record the type for the newly declared variable
+        let ret_typ = match kind {
+            RK::MoveTo => None,
+            RK::MoveFrom => Some(typ.clone()),
+            RK::BorrowGlobal => Some(Type::Ref(Box::new(typ.clone()))),
+            RK::BorrowGlobalMut => Some(Type::MutRef(Box::new(typ.clone()))),
+            RK::Exists => Some(Type::Bool),
+        };
+
+        if ret_typ.is_some() {
+            self.env_mut()
+                .type_pool
+                .insert_mapping(&name.clone().unwrap(), &ret_typ.unwrap());
+        }
+
+        let arg = match kind {
+            RK::MoveTo => {
+                Some(self.generate_expression_of_type(u, parent_scope, &typ, true, true)?)
+            },
+            _ => None,
+        };
+
+        // Record the type for current function to acqurie
+        if !matches!(kind, RK::MoveTo) {
+            self.env_mut().record_acquire(&typ, parent_scope);
+        }
+
+        Ok(ResourceOperation {
+            kind,
+            name,
+            typ,
+            arg,
+            signer,
+            addr,
+        })
     }
 
     /// Generate an assignment to an existing variable.
@@ -1311,6 +1417,9 @@ impl MoveSmith {
         // Store candidate expressions for the given type
         let mut choices: Vec<Expression> = Vec::new();
 
+        let mut default_options: Vec<fn(&mut Unstructured) -> Result<Expression>> = vec![];
+        let mut options: Vec<fn(&mut Unstructured) -> Result<Expression>> = vec![];
+
         // Directly generate a value for basic types
         let some_candidate = match typ {
             Type::U8 | Type::U16 | Type::U32 | Type::U64 | Type::U128 | Type::U256 => {
@@ -1459,7 +1568,6 @@ impl MoveSmith {
         );
         match idx {
             0 => {
-                // Generate an If-Else with the given type
                 let if_else = self.generate_if(u, parent_scope, Some(typ.clone()))?;
                 choices.push(Expression::IfElse(Box::new(if_else)));
             },
@@ -2008,6 +2116,10 @@ impl MoveSmith {
 
         unregister();
 
+        // TODO: this rely on the fact that we generate leaf functions first
+        // TODO: should implement a proper algorithm for during post processing
+        self.env_mut().record_acquires(func.acquires.clone());
+
         trace!("Done generating call to function: {:?}", func.name);
         Ok(FunctionCall {
             name: func.name.clone(),
@@ -2122,9 +2234,6 @@ impl MoveSmith {
     /// Returns one of the basic types that does not require a type argument.
     ///
     /// First choose a category of types, then choose a type from that category.
-    /// Categories include:
-    ///     * basic (number and boolean)
-    ///     * structs (each struct definition is considered a type)
     fn get_random_type(
         &self,
         u: &mut Unstructured,
