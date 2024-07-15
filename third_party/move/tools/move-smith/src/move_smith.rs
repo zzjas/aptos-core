@@ -46,9 +46,6 @@ pub struct MoveSmith {
     script: Option<Script>,
     runs: RefCell<Vec<Identifier>>,
 
-    // Skeleton Information
-    function_signatures: RefCell<Vec<FunctionSignature>>,
-
     // Bookkeeping
     env: RefCell<Env>,
 }
@@ -69,7 +66,6 @@ impl MoveSmith {
             modules: Vec::new(),
             script: None,
             runs: RefCell::new(Vec::new()),
-            function_signatures: RefCell::new(Vec::new()),
             env: RefCell::new(env),
         }
     }
@@ -146,10 +142,6 @@ impl MoveSmith {
     ) -> Result<()> {
         for s in module.borrow().structs.iter() {
             self.post_process_struct(u, s)?;
-        }
-
-        for f in module.borrow().functions.iter() {
-            self.post_process_function(u, f)?;
         }
 
         Ok(())
@@ -662,12 +654,6 @@ impl MoveSmith {
         let (name, scope) = self.get_next_identifier(IDKinds::Function, parent_scope);
         let signature: FunctionSignature = self.generate_function_signature(u, &scope, name)?;
 
-        // Keep track of the function signature separately so that we don't have
-        // to go through all modules to get signatures
-        self.function_signatures
-            .borrow_mut()
-            .push(signature.clone());
-
         let func = Function {
             signature,
             visibility: Visibility { public: true },
@@ -699,6 +685,7 @@ impl MoveSmith {
         let acquires = self.env_mut().get_and_clean_curr_acquires();
         function.borrow_mut().signature.acquires = acquires;
         function.borrow_mut().body = Some(body);
+        self.post_process_function(u, function)?;
         Ok(())
     }
 
@@ -981,7 +968,7 @@ impl MoveSmith {
         };
 
         // Record the type for current function to acqurie
-        if !matches!(kind, RK::MoveTo) {
+        if !matches!(kind, RK::MoveTo) && !matches!(kind, RK::Exists) {
             self.env_mut().record_acquire(&typ, parent_scope);
         }
 
@@ -2118,7 +2105,8 @@ impl MoveSmith {
 
         // TODO: this rely on the fact that we generate leaf functions first
         // TODO: should implement a proper algorithm for during post processing
-        self.env_mut().record_acquires(func.acquires.clone());
+        self.env_mut()
+            .record_acquires(func.acquires.clone(), parent_scope);
 
         trace!("Done generating call to function: {:?}", func.name);
         Ok(FunctionCall {
@@ -2367,19 +2355,22 @@ impl MoveSmith {
     fn get_callable_functions(&self, scope: &Scope) -> Vec<FunctionSignature> {
         let caller_num: usize = self.get_function_num(&scope.clone().0.unwrap_or("".to_string()));
         let mut callable = Vec::new();
-        for f in self.function_signatures.borrow().iter() {
-            if self.env().id_pool.is_id_in_scope(&f.name, scope) {
-                // Note: heuristic hack to avoid recursive calls
-                // Only allow function with smaller name to call function with larger name
-                // While recursive calls are interesting, they waste fuzzing time
-                // e.g function0 can call function1, but function1 cannot call function0
-                if !self.config.borrow().allow_recursive_calls {
-                    let callee_num = self.get_function_num(&f.name.to_string());
-                    if caller_num >= callee_num {
-                        continue;
+        for m in self.modules.iter() {
+            for f in m.borrow().functions.iter() {
+                let sig = f.borrow().signature.clone();
+                if self.env().id_pool.is_id_in_scope(&sig.name, scope) {
+                    // Note: heuristic hack to avoid recursive calls
+                    // Only allow function with smaller name to call function with larger name
+                    // While recursive calls are interesting, they waste fuzzing time
+                    // e.g function0 can call function1, but function1 cannot call function0
+                    if !self.config.borrow().allow_recursive_calls {
+                        let callee_num = self.get_function_num(&sig.name.to_string());
+                        if caller_num >= callee_num {
+                            continue;
+                        }
                     }
+                    callable.push(sig);
                 }
-                callable.push(f.clone());
             }
         }
         callable
