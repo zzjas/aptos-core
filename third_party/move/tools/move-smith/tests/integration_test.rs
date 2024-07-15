@@ -12,7 +12,7 @@ use move_smith::{
     utils::*,
 };
 use num_bigint::BigUint;
-use std::cell::RefCell;
+use std::{cell::RefCell, collections::BTreeMap};
 
 fn simple_module() -> Module {
     Module {
@@ -27,6 +27,7 @@ fn simple_module() -> Module {
                     (Identifier::new_str("param2", IDKind::Var), Type::U8),
                 ],
                 return_type: Some(Type::U32),
+                acquires: BTreeMap::new(),
             },
             visibility: Visibility { public: true },
             body: Some(Block {

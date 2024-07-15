@@ -7,13 +7,13 @@
 //! parser's AST and we might be able to reuse the parser's AST directly.
 
 use crate::{
-    names::{Identifier, IdentifierKind as IDKind},
+    names::{Identifier, IdentifierKind as IDKind, Scope},
     types::{Ability, HasType, Type, TypeArgs, TypeParameters},
     CodeGenerator,
 };
 use arbitrary::Arbitrary;
 use num_bigint::BigUint;
-use std::cell::RefCell;
+use std::{cell::RefCell, collections::BTreeMap};
 
 /// The collection of modules and scripts that make up a Move program.
 /// This is the final output of the MoveSmith fuzzer.
@@ -68,6 +68,14 @@ pub struct FunctionSignature {
     pub name: Identifier,
     pub parameters: Vec<(Identifier, Type)>,
     pub return_type: Option<Type>,
+    /// Keep track of what types a function needs to acquire
+    /// Maps name of a struct to a block scope
+    /// e.g. `Struct2 -> _block1` means while generating `_block1`, the `Struct2`
+    /// was acquired.
+    /// Block information is needed to remove unnecessary acquires.
+    /// We only keep track of the struct name instead of the
+    /// full type instantiation with parameters
+    pub acquires: BTreeMap<Identifier, Scope>,
 }
 
 /// An expression block
@@ -104,8 +112,36 @@ pub enum Statement {
     // Continue,
     Decl(Declaration),
     Expr(Expression),
+    Resource(ResourceOperation),
 }
 
+/// Kinds of global resource storage operations
+#[derive(Debug, Clone, Arbitrary)]
+pub enum ResourceOperationKind {
+    MoveTo,
+    MoveFrom,
+    BorrowGlobal,
+    BorrowGlobalMut,
+    Exists,
+}
+
+/// A global storage operation.
+/// Each storage operation is generated as a declaration.
+/// Any return value will be stored in a variable.
+#[derive(Debug, Clone)]
+pub struct ResourceOperation {
+    // move_to doesn't have a return value so we use Option
+    pub name: Option<Identifier>,
+    pub kind: ResourceOperationKind,
+    pub typ: Type,
+
+    // For move_to only
+    pub arg: Option<Expression>,
+    pub signer: Option<Expression>,
+
+    // For non move_to operations
+    pub addr: Option<Expression>,
+}
 /// An inline struct initialization.
 #[derive(Debug, Clone)]
 pub struct StructPack {

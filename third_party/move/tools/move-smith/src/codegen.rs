@@ -6,7 +6,7 @@ use crate::{
     names::{Identifier, IdentifierKind as IDKind},
     types::{Ability, StructTypeConcrete, Type, TypeArgs, TypeParameter, TypeParameters},
 };
-use std::vec;
+use std::{collections::BTreeMap, vec};
 
 /// Generates Move source code from an AST.
 /// `emit_code_lines` should be implemented for each AST node.
@@ -104,6 +104,7 @@ impl CodeGenerator for Script {
                 parameters: Vec::new(),
                 type_parameters: TypeParameters::default(),
                 return_type: None,
+                acquires: BTreeMap::new(),
             },
             visibility: Visibility { public: false },
             // Hardcode one function to simplify the output
@@ -261,14 +262,28 @@ impl CodeGenerator for Function {
 
         let type_params = self.signature.type_parameters.inline();
 
+        let acquires = match self.signature.acquires.is_empty() {
+            true => "".to_string(),
+            false => {
+                let acquires: Vec<String> = self
+                    .signature
+                    .acquires
+                    .iter()
+                    .map(|(st, _)| st.inline())
+                    .collect();
+                format!(" acquires {}", acquires.join(", "))
+            },
+        };
+
         let mut code = vec![format!(
-            "{}{}fun {}{}({}){}",
+            "{}{}fun {}{}({}){}{}",
             visibility,
             inline,
             self.signature.name.emit_code(),
             type_params,
             parameters,
-            return_type
+            return_type,
+            acquires,
         )];
         let body = match self.body {
             Some(ref body) => body.emit_code_lines(),
@@ -313,9 +328,43 @@ impl CodeGenerator for Statement {
                 }
                 code
             },
+            Statement::Resource(op) => op.emit_code_lines(),
         }
     }
 }
+
+impl CodeGenerator for ResourceOperation {
+    fn emit_code_lines(&self) -> Vec<String> {
+        use ResourceOperationKind::*;
+
+        let id = match self.name.as_ref() {
+            Some(ident) => format!("let {} = ", ident.emit_code()),
+            None => "".to_string(),
+        };
+
+        let call = match self.kind {
+            MoveTo => "move_to",
+            MoveFrom => "move_from",
+            BorrowGlobal => "borrow_global",
+            BorrowGlobalMut => "borrow_global_mut",
+            Exists => "exists",
+        };
+
+        let typ = self.typ.emit_code();
+
+        let args = match self.kind {
+            MoveTo => format!(
+                "{}, {}",
+                self.signer.as_ref().unwrap().inline(),
+                self.arg.as_ref().unwrap().inline()
+            ),
+            _ => self.addr.as_ref().unwrap().inline(),
+        };
+
+        vec![format!("{}{}<{}>({});", id, call, typ, args)]
+    }
+}
+
 impl CodeGenerator for Declaration {
     fn emit_code_lines(&self) -> Vec<String> {
         let type_anno = match self.emit_type {
