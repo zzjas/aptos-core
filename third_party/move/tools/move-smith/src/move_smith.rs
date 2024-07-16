@@ -235,11 +235,9 @@ impl MoveSmith {
         // If a function calls itself, we cnanot inline it
         if body_code.contains(&self_name) {
             function.borrow_mut().signature.inline = false;
-        } else if !self.env().reached_inline_function_limit() {
-            if bool::arbitrary(u)? {
-                function.borrow_mut().signature.inline = true;
-                self.env_mut().inc_inline_func_counter();
-            }
+        } else if !self.env().reached_inline_function_limit() && bool::arbitrary(u)? {
+            function.borrow_mut().signature.inline = true;
+            self.env_mut().inc_inline_func_counter();
         }
 
         // Handles acquires from direct resource operations
@@ -994,7 +992,7 @@ impl MoveSmith {
             _ => None,
         };
 
-        let typs = self.get_types_with_abilities(parent_scope, &vec![Ability::Key], true);
+        let typs = self.get_types_with_abilities(parent_scope, &[Ability::Key], true);
         let typ = u.choose(&typs)?.clone();
         assert!(!typ.is_some_ref());
 
@@ -1007,10 +1005,10 @@ impl MoveSmith {
             RK::Exists => Some(Type::Bool),
         };
 
-        if ret_typ.is_some() {
+        if let Some(ret_typ) = ret_typ {
             self.env_mut()
                 .type_pool
-                .insert_mapping(&name.clone().unwrap(), &ret_typ.unwrap());
+                .insert_mapping(&name.clone().unwrap(), &ret_typ);
         }
 
         let arg = match kind {

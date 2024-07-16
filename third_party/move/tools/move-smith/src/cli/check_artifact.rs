@@ -5,10 +5,7 @@
 
 use arbitrary::Unstructured;
 use clap::Parser;
-use move_smith::{
-    utils::{compile_move_code, run_transactional_test},
-    CodeGenerator, MoveSmith,
-};
+use move_smith::{utils::run_transactional_test, CodeGenerator, MoveSmith};
 use std::{fs, path::PathBuf};
 
 #[derive(Debug, Parser)]
@@ -34,12 +31,6 @@ fn main() {
     };
     let code = smith.get_compile_unit().emit_code();
     println!("Loaded code from file: {:?}", args.input_file);
-
-    // compile_move_code(code.clone(), true, false);
-    // println!("Compiled code with V1 did not panic");
-
-    // compile_move_code(code.clone(), false, true);
-    // println!("Compiled code with V2 did not panic");
 
     let result = run_transactional_test(code, &smith.config.take());
     if result.is_err() {

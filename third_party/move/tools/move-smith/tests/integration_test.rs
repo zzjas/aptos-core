@@ -166,5 +166,5 @@ fn test_expr_collector() {
     let addr_exprs = fref.all_exprs(Some(|e| matches!(e, Expression::AddressLiteral(_))));
     assert!(addr_exprs.len() == 1);
     let call_exprs = fref.all_exprs(Some(|e| matches!(e, Expression::FunctionCall(_))));
-    assert!(call_exprs.len() == 0);
+    assert!(call_exprs.is_empty());
 }

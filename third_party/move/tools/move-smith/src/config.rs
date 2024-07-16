@@ -79,6 +79,7 @@ impl Default for Config {
                 "same mutable reference in value is also used".to_string(),
                 "could create dangling a reference".to_string(),
                 "referential transparency violated".to_string(),
+                "EXTRANEOUS_ACQUIRES_ANNOTATION".to_string(),
             ],
 
             experiment_combos: vec![
