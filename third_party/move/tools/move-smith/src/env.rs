@@ -235,6 +235,12 @@ impl Env {
         trace!("Increment expr depth by {} to: {}", *inc, self.expr_depth,);
     }
 
+    pub fn increase_expr_depth_by(&mut self, inc: usize) {
+        self.expr_depth += inc;
+        self.expr_depth_history.push(inc);
+        trace!("Increment expr depth by {} to: {}", inc, self.expr_depth,);
+    }
+
     /// Decrease the expression depth by the last increased amount.
     /// This should be called after `increase_expr_depth` and
     /// they should always be in pairs.
@@ -296,11 +302,11 @@ impl Env {
     }
 
     pub fn record_acquires(&mut self, new_acquires: BTreeMap<Identifier, Scope>, scope: &Scope) {
-        println!("searchme: before extend: {:?}", self.curr_acquires);
+        // println!("searchme: before extend: {:?}", self.curr_acquires);
         for (k, v) in new_acquires {
             self.curr_acquires.insert(k, scope.clone());
         }
-        println!("searchme: after extend: {:?}", self.curr_acquires);
+        // println!("searchme: after extend: {:?}", self.curr_acquires);
     }
 
     pub fn get_and_clean_curr_acquires(&mut self) -> BTreeMap<Identifier, Scope> {

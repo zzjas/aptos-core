@@ -27,7 +27,7 @@ use crate::{
         Ability, HasType, StructType, StructTypeConcrete, Type, TypeArgs, TypeParameter,
         TypeParameters,
     },
-    utils::choose_idx_weighted,
+    utils::{choose_idx_weighted, choose_idx_weighted_with},
 };
 use arbitrary::{Arbitrary, Error, Result, Unstructured};
 use log::{info, trace, warn};
@@ -35,6 +35,7 @@ use num_bigint::BigUint;
 use std::{
     cell::{Ref, RefCell, RefMut},
     collections::{BTreeMap, BTreeSet},
+    rc::Rc,
 };
 
 /// Keeps track of the generation state.
@@ -681,7 +682,7 @@ impl MoveSmith {
             self.env_mut().live_vars.mark_alive(&scope, arg);
         }
 
-        let body = self.generate_block(u, &scope, None, signature.return_type.clone())?;
+        let body = self.generate_block(u, &scope, None, signature.return_type.as_ref())?;
         let acquires = self.env_mut().get_and_clean_curr_acquires();
         function.borrow_mut().signature.acquires = acquires;
         function.borrow_mut().body = Some(body);
@@ -822,7 +823,7 @@ impl MoveSmith {
         u: &mut Unstructured,
         parent_scope: &Scope,
         num_stmts: Option<usize>,
-        ret_typ: Option<Type>,
+        ret_typ: Option<&Type>,
     ) -> Result<Block> {
         trace!(
             "Generating block with parent scope: {:?}, depth: {}",
@@ -842,7 +843,7 @@ impl MoveSmith {
             self.generate_statements(u, &block_scope, num_stmts)?
         };
         let return_expr = match ret_typ {
-            Some(ref typ) => Some(self.generate_block_return(u, &block_scope, typ)?),
+            Some(typ) => Some(self.generate_block_return(u, &block_scope, typ)?),
             None => None,
         };
         trace!("Done generating block: {:?}", block_scope);
@@ -861,10 +862,15 @@ impl MoveSmith {
         parent_scope: &Scope,
         typ: &Type,
     ) -> Result<Expression> {
-        let var_acc = self.generate_varible_access(u, parent_scope, false, Some(typ))?;
-        match var_acc {
-            Some(va) => Ok(Expression::Variable(va)),
-            None => Ok(self.generate_expression_of_type(u, parent_scope, typ, true, true)?),
+        if self.can_generate_variable_access(parent_scope, Some(typ)) {
+            Ok(Expression::Variable(self.generate_varible_access(
+                u,
+                parent_scope,
+                false,
+                Some(typ),
+            )?))
+        } else {
+            Ok(self.generate_expression_of_type(u, parent_scope, typ, true, true)?)
         }
     }
 
@@ -1137,7 +1143,7 @@ impl MoveSmith {
                     },
                     false => None,
                 };
-                let block = self.generate_block(u, parent_scope, None, ret_typ)?;
+                let block = self.generate_block(u, parent_scope, None, ret_typ.as_ref())?;
                 Expression::Block(Box::new(block))
             },
             // Generate a function call
@@ -1398,30 +1404,48 @@ impl MoveSmith {
             _ => (),
         }
 
-        // Store default choices that do not require recursion
-        // If other options are available, will not use these
-        let mut default_choices: Vec<Expression> = Vec::new();
-        // Store candidate expressions for the given type
-        let mut choices: Vec<Expression> = Vec::new();
+        let u = Rc::new(RefCell::new(u));
+        // Helper function to generate closures
+        fn generate_closure<'a>(
+            s: &'a MoveSmith,
+            u: Rc<RefCell<&'a mut Unstructured>>,
+            expr_fn: impl 'a + Fn(&'a MoveSmith, &'a mut Unstructured) -> Result<Expression>,
+        ) -> Box<dyn FnMut() -> Result<Expression> + 'a> {
+            let uref = Rc::clone(&u);
+            Box::new(move || {
+                // let mut u_borrowed = u.borrow_mut();
+                expr_fn(s, &mut uref.borrow_mut())
+            })
+        }
 
-        let mut default_options: Vec<fn(&mut Unstructured) -> Result<Expression>> = vec![];
-        let mut options: Vec<fn(&mut Unstructured) -> Result<Expression>> = vec![];
+        let mut choices: Vec<Box<dyn FnMut() -> Result<Expression>>> = vec![];
 
         // Directly generate a value for basic types
-        let some_candidate = match typ {
+        let uref = Rc::clone(&u);
+        let some_candidate: Option<Box<dyn FnMut() -> Result<Expression>>> = match typ {
             Type::U8 | Type::U16 | Type::U32 | Type::U64 | Type::U128 | Type::U256 => {
-                Some(Expression::NumberLiteral(self.generate_number_literal(
-                    u,
-                    Some(typ),
-                    None,
-                    None,
-                )?))
+                Some(Box::new(move || {
+                    let r = Expression::NumberLiteral(self.generate_number_literal(
+                        &mut uref.borrow_mut(),
+                        Some(typ),
+                        None,
+                        None,
+                    )?);
+                    Ok(r)
+                }))
             },
-            Type::Bool => Some(Expression::Boolean(bool::arbitrary(u)?)),
-            Type::Struct(st) => Some(self.generate_struct_pack(u, parent_scope, &st.name)?),
-            Type::StructConcrete(st) => {
-                Some(self.generate_struct_pack_concrete(u, parent_scope, st)?)
-            },
+            Type::Bool => Some(Box::new(move || {
+                let r = Expression::Boolean(bool::arbitrary(&mut uref.borrow_mut())?);
+                Ok(r)
+            })),
+            Type::Struct(st) => Some(Box::new(move || {
+                let r =
+                    self.generate_struct_pack(&mut uref.borrow_mut(), parent_scope, &st.name)?;
+                Ok(r)
+            })),
+            Type::StructConcrete(st) => Some(Box::new(move || {
+                self.generate_struct_pack_concrete(&mut uref.borrow_mut(), parent_scope, st)
+            })),
             // Here we always try to concretize the type.
             // It's tricky to avoid infinite loop:
             // If the type is concretized, then it's guarenteed that the call to
@@ -1432,15 +1456,18 @@ impl MoveSmith {
             // creating new object or from variables.
             // However, we must assert that `allow_var` is enabled.
             Type::TypeParameter(_) => {
-                if let Some(concretized) = self.concretize_type(u, typ, parent_scope, vec![], None)
+                if let Some(concretized) =
+                    self.concretize_type(&mut u.borrow_mut(), typ, parent_scope, vec![], None)
                 {
-                    Some(self.generate_expression_of_type(
-                        u,
-                        parent_scope,
-                        &concretized,
-                        allow_var,
-                        allow_call,
-                    )?)
+                    Some(Box::new(move || {
+                        self.generate_expression_of_type(
+                            &mut uref.borrow_mut(),
+                            parent_scope,
+                            &concretized,
+                            allow_var,
+                            allow_call,
+                        )
+                    }))
                 } else {
                     // In this branch, we have a type parameter that cannot be
                     // further concretized, thus the only expression we can
@@ -1456,65 +1483,70 @@ impl MoveSmith {
         };
 
         if let Some(candidate) = some_candidate {
-            if let Type::TypeParameter(_) = typ {
-                // Keep the expression for the concrete type
-                choices.push(candidate.clone());
-            }
-            default_choices.push(candidate);
+            choices.push(candidate);
         }
 
         // Access identifier with the given type
+        let uref = Rc::clone(&u);
         if allow_var {
-            let var_acc = self.generate_varible_access(u, parent_scope, true, Some(typ));
-            if let Some(va) = var_acc? {
-                let expr = Expression::Variable(va);
-                default_choices.push(expr.clone());
-                choices.push(expr);
+            if self.can_generate_variable_access(parent_scope, Some(typ)) {
+                choices.push(Box::new(move || {
+                    let r = Expression::Variable(self.generate_varible_access(
+                        &mut uref.borrow_mut(),
+                        parent_scope,
+                        true,
+                        Some(typ),
+                    )?);
+                    Ok(r)
+                }))
             }
         }
 
         // If the default choice is empty here, it means we are working on a
         // reference type but cannot find a variable for it.
-        if default_choices.is_empty() {
+        let uref = Rc::clone(&u);
+        if choices.is_empty() {
             trace!(
                 "No default choices for type: {} <-- should be a ref",
                 typ.inline()
             );
-            let ref_expr = match typ {
-                Type::Ref(inner) => Some(Expression::Reference(Box::new(
-                    self.generate_expression_of_type(
-                        u,
+            match typ {
+                Type::Ref(inner) => choices.push(Box::new(move || {
+                    let r = Expression::Reference(Box::new(self.generate_expression_of_type(
+                        &mut uref.borrow_mut(),
                         parent_scope,
                         inner,
                         allow_var,
                         allow_call,
-                    )?,
-                ))),
-                Type::MutRef(inner) => Some(Expression::MutReference(Box::new(
-                    self.generate_expression_of_type(
-                        u,
+                    )?));
+                    Ok(r)
+                })),
+                Type::MutRef(inner) => choices.push(Box::new(move || {
+                    let r = Expression::MutReference(Box::new(self.generate_expression_of_type(
+                        &mut uref.borrow_mut(),
                         parent_scope,
                         inner,
                         allow_var,
                         allow_call,
-                    )?,
-                ))),
-                _ => None,
-            };
-            if let Some(e) = ref_expr {
-                default_choices.push(e.clone());
-                choices.push(e);
+                    )?));
+                    Ok(r)
+                })),
+                _ => (),
             }
         }
 
         // Now we have collected all candidate expressions that do not require recursion
         // We can perform the expr_depth check here
-        assert!(!default_choices.is_empty());
+        assert!(!choices.is_empty());
         if self.env().reached_expr_depth_limit() {
             warn!("Max expr depth reached while gen expr of type: {:?}", typ);
-            return Ok(u.choose(&default_choices)?.clone());
+            let idx = u.borrow_mut().choose_index(choices.len()).unwrap();
+            let f = choices.get_mut(idx).unwrap();
+            return f();
         }
-        self.env_mut().increase_expr_depth(u);
+
+        let inc = u.borrow_mut().int_in_range(0..=3)? as usize;
+        self.env_mut().increase_expr_depth_by(inc);
 
         let callables: Vec<FunctionSignature> = self
             .get_callable_functions(parent_scope)
@@ -1547,36 +1579,56 @@ impl MoveSmith {
             deref_weight,     // Dereference
         ];
 
-        let idx = choose_idx_weighted(u, &weights)?;
+        let weight_choice = u.borrow_mut().int_in_range(0..=100)? as usize;
+        let idx = choose_idx_weighted_with(weight_choice, &weights)?;
         trace!(
             "Selecting expression of type kind, idx is {}, weights: {:?}",
             idx,
             weights
         );
+        let uref = Rc::clone(&u);
         match idx {
-            0 => {
-                let if_else = self.generate_if(u, parent_scope, Some(typ.clone()))?;
-                choices.push(Expression::IfElse(Box::new(if_else)));
-            },
+            0 => choices.push(Box::new(move || {
+                let r = Expression::IfElse(Box::new(self.generate_if(
+                    &mut uref.borrow_mut(),
+                    parent_scope,
+                    Some(typ),
+                )?));
+                Ok(r)
+            })),
             1 => {
                 assert!(!callables.is_empty());
-                let func = u.choose(&callables)?;
-                let call =
-                    self.generate_call_to_function(u, parent_scope, func, Some(typ), true)?;
-                choices.push(Expression::FunctionCall(call));
+                let callee = u.borrow_mut().choose(&callables)?.clone();
+                choices.push(Box::new(move || {
+                    let r = Expression::FunctionCall(self.generate_call_to_function(
+                        &mut uref.borrow_mut(),
+                        parent_scope,
+                        &callee,
+                        Some(typ),
+                        true,
+                    )?);
+                    Ok(r)
+                }));
             },
             2 => {
                 // Generate a binary operation with the given type
                 // Binary operations can output numerical and boolean values
                 assert!(typ.is_num_or_bool());
-                let binop = self.generate_binary_operation(u, parent_scope, Some(typ.clone()))?;
-                choices.push(Expression::BinaryOperation(Box::new(binop)));
+                choices.push(Box::new(move || {
+                    let r = Expression::BinaryOperation(Box::new(self.generate_binary_operation(
+                        &mut uref.borrow_mut(),
+                        parent_scope,
+                        Some(typ),
+                    )?));
+                    Ok(r)
+                }));
             },
             3 => {
                 // Generate a dereference expression
                 assert!(!typ.is_ref());
-                let deref = self.generate_dereference(u, parent_scope, typ)?;
-                choices.push(deref);
+                choices.push(Box::new(move || {
+                    self.generate_dereference(&mut uref.borrow_mut(), parent_scope, typ)
+                }));
             },
             _ => panic!("Invalid option for expression generation"),
         };
@@ -1584,15 +1636,20 @@ impl MoveSmith {
         // Decrement the expression depth
         self.env_mut().decrease_expr_depth();
 
-        let use_choice = match choices.is_empty() {
-            true => default_choices,
-            false => choices,
-        };
-        Ok(u.choose(&use_choice)?.clone())
+        let idx = u.borrow_mut().choose_index(choices.len()).unwrap();
+        let f = choices.get_mut(idx).unwrap();
+        f()
+    }
+
+    fn can_generate_variable_access(&self, parent_scope: &Scope, typ: Option<&Type>) -> bool {
+        let idents = self.env().live_variables(parent_scope, typ);
+        !idents.is_empty()
     }
 
     /// Generate a valid varibale access
     /// If `typ` is given, the chosen varibale will have the same type.
+    ///
+    /// Assumes `can_generate_variable_access` is checked before calling this function.
     #[allow(unused_assignments)]
     fn generate_varible_access(
         &self,
@@ -1600,13 +1657,8 @@ impl MoveSmith {
         parent_scope: &Scope,
         allow_copy: bool,
         typ: Option<&Type>,
-    ) -> Result<Option<VariableAccess>> {
+    ) -> Result<VariableAccess> {
         let idents = self.env().live_variables(parent_scope, typ);
-        // No live variable to use in the scope
-        // TODO: consider generate a declaration with assignment here?
-        if idents.is_empty() {
-            return Ok(None);
-        }
 
         let chosen = u.choose(&idents)?.clone();
         let abilities = self.derive_abilities_of_var(&chosen);
@@ -1633,7 +1685,7 @@ impl MoveSmith {
             copy = false;
         }
 
-        Ok(Some(VariableAccess { name: chosen, copy }))
+        Ok(VariableAccess { name: chosen, copy })
     }
 
     /// Generate a deference expression of type `typ`
@@ -1677,7 +1729,7 @@ impl MoveSmith {
         &self,
         u: &mut Unstructured,
         parent_scope: &Scope,
-        typ: Option<Type>,
+        typ: Option<&Type>,
     ) -> Result<IfExpr> {
         trace!("Generating if expression of type: {:?}", typ);
         trace!("Generating condition for if expression");
@@ -1688,7 +1740,7 @@ impl MoveSmith {
 
         // When the If expression has a non-unit type
         // We have to generate an Else expression to match the type
-        let else_expr = match (&typ, bool::arbitrary(u)?) {
+        let else_expr = match (typ, bool::arbitrary(u)?) {
             (Some(_), _) => Some(self.generate_else(u, parent_scope, typ.clone())?),
             (None, true) => Some(self.generate_else(u, parent_scope, None)?),
             (None, false) => None,
@@ -1707,11 +1759,14 @@ impl MoveSmith {
         &self,
         u: &mut Unstructured,
         parent_scope: &Scope,
-        typ: Option<Type>,
+        typ: Option<&Type>,
     ) -> Result<ElseExpr> {
         trace!("Generating block for else branch");
-        let body = self.generate_block(u, parent_scope, None, typ.clone())?;
-        Ok(ElseExpr { typ, body })
+        let body = self.generate_block(u, parent_scope, None, typ)?;
+        Ok(ElseExpr {
+            typ: typ.cloned(),
+            body,
+        })
     }
 
     /// Generate a random binary operation.
@@ -1721,12 +1776,12 @@ impl MoveSmith {
         &self,
         u: &mut Unstructured,
         parent_scope: &Scope,
-        typ: Option<Type>,
+        typ: Option<&Type>,
     ) -> Result<BinaryOperation> {
         trace!("Generating binary operation");
         let chosen_typ = match typ {
             Some(t) => match t.is_num_or_bool() {
-                true => t,
+                true => t.clone(),
                 false => panic!("Invalid type for binary operation"),
             },
             None => self.get_random_type(u, parent_scope, true, false, false, false, false)?,
@@ -1739,13 +1794,13 @@ impl MoveSmith {
                 5, // equality check
             ];
             match choose_idx_weighted(u, &weights)? {
-                0 => self.generate_numerical_binop(u, parent_scope, Some(chosen_typ)),
+                0 => self.generate_numerical_binop(u, parent_scope, Some(&chosen_typ)),
                 1 => self.generate_boolean_binop(u, parent_scope),
                 2 => self.generate_equality_check(u, parent_scope, None),
                 _ => panic!("Invalid option for binary operation"),
             }
         } else {
-            self.generate_numerical_binop(u, parent_scope, Some(chosen_typ))
+            self.generate_numerical_binop(u, parent_scope, Some(&chosen_typ))
         }
     }
 
@@ -1757,11 +1812,11 @@ impl MoveSmith {
         &self,
         u: &mut Unstructured,
         parent_scope: &Scope,
-        typ: Option<Type>,
+        typ: Option<&Type>,
     ) -> Result<BinaryOperation> {
         use NumericalBinaryOperator as OP;
         // Select the operator
-        let op = match &typ {
+        let op = match typ {
             // A desired output type is specified
             Some(typ) => {
                 let ops = match (typ.is_numerical(), typ.is_bool()) {
@@ -1791,9 +1846,9 @@ impl MoveSmith {
             None => OP::arbitrary(u)?,
         };
 
-        let typ = match &typ {
+        let typ = match typ {
             Some(Type::U8) | Some(Type::U16) | Some(Type::U32) | Some(Type::U64)
-            | Some(Type::U128) | Some(Type::U256) => typ.unwrap(),
+            | Some(Type::U128) | Some(Type::U256) => typ.unwrap().clone(),
             // To generate a boolean, we can select any numerical type
             // If a type is not provided, we also randomly select a numerical type
             Some(Type::Bool) | None => {

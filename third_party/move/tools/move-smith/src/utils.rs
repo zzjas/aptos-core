@@ -86,15 +86,10 @@ impl fmt::Display for TransactionalResult {
     }
 }
 
-/// Choose a random index based on the given probabilities.
-/// e.g. if `weights` has [10, 20, 20], there are 3 options,
-/// so this function will return 0, 1, or 2.
-/// The probability for returning each element is based on the given weights.
-// TODO: consider using `rand::distributions::WeightedIndex` for this.
-// The current `int_in_range` doesn't seems to be evenly distributed.
-// Concern is that the fuzzer will not be able to directly control the choice
-pub fn choose_idx_weighted(u: &mut Unstructured, weights: &[u32]) -> Result<usize> {
+/// `choice` should be an integer between 0 and 100
+pub fn choose_idx_weighted_with(choice: usize, weights: &[u32]) -> Result<usize> {
     assert!(!weights.is_empty());
+    let choice = choice as f32 / 100.0;
     let sum = weights.iter().sum::<u32>();
     let thresholds = weights
         .iter()
@@ -104,13 +99,24 @@ pub fn choose_idx_weighted(u: &mut Unstructured, weights: &[u32]) -> Result<usiz
         })
         .collect::<Vec<f32>>();
 
-    let choice = u.int_in_range(0..=100)? as f32 / 100.0;
     for (i, threshold) in thresholds.iter().enumerate() {
         if choice <= *threshold {
             return Ok(i);
         }
     }
     Ok(0)
+}
+
+/// Choose a random index based on the given probabilities.
+/// e.g. if `weights` has [10, 20, 20], there are 3 options,
+/// so this function will return 0, 1, or 2.
+/// The probability for returning each element is based on the given weights.
+// TODO: consider using `rand::distributions::WeightedIndex` for this.
+// The current `int_in_range` doesn't seems to be evenly distributed.
+// Concern is that the fuzzer will not be able to directly control the choice
+pub fn choose_idx_weighted(u: &mut Unstructured, weights: &[u32]) -> Result<usize> {
+    let choice = u.int_in_range(0..=100)? as usize;
+    choose_idx_weighted_with(choice, weights)
 }
 
 /// Get random bytes
