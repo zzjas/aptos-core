@@ -6,7 +6,7 @@ use crate::{
     names::{Identifier, IdentifierKind as IDKind},
     types::{Ability, StructTypeConcrete, Type, TypeArgs, TypeParameter, TypeParameters},
 };
-use std::{collections::BTreeMap, vec};
+use std::{collections::BTreeSet, vec};
 
 /// Generates Move source code from an AST.
 /// `emit_code_lines` should be implemented for each AST node.
@@ -101,7 +101,7 @@ impl CodeGenerator for Script {
                 parameters: Vec::new(),
                 type_parameters: TypeParameters::default(),
                 return_type: None,
-                acquires: BTreeMap::new(),
+                acquires: BTreeSet::new(),
             },
             visibility: Visibility { public: false },
             // Hardcode one function to simplify the output
@@ -266,7 +266,7 @@ impl CodeGenerator for Function {
                     .signature
                     .acquires
                     .iter()
-                    .map(|(st, _)| st.inline())
+                    .map(|st| st.inline())
                     .collect();
                 format!(" acquires {}", acquires.join(", "))
             },
@@ -325,7 +325,6 @@ impl CodeGenerator for Statement {
                 }
                 code
             },
-            Statement::Resource(op) => op.emit_code_lines(),
         }
     }
 }
@@ -358,7 +357,7 @@ impl CodeGenerator for ResourceOperation {
             _ => self.addr.as_ref().unwrap().inline(),
         };
 
-        vec![format!("{}{}<{}>({});", id, call, typ, args)]
+        vec![format!("{}{}<{}>({})", id, call, typ, args)]
     }
 }
 
@@ -395,6 +394,7 @@ impl CodeGenerator for Expression {
             Expression::Reference(expr) => vec![format!("&({})", expr.inline())],
             Expression::Dereference(expr) => vec![format!("*({})", expr.inline())],
             Expression::MutReference(expr) => vec![format!("&mut ({})", expr.inline())],
+            Expression::Resource(rop) => rop.emit_code_lines(),
         }
     }
 }

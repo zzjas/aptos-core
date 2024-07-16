@@ -144,6 +144,52 @@ impl MoveSmith {
             self.post_process_struct(u, s)?;
         }
 
+        // Handle acquires from function calls
+        let mut acquires_map = BTreeMap::new();
+        let mut call_map = BTreeMap::new();
+        for f in module.borrow().functions.iter() {
+            let fref = f.borrow();
+            let name = fref.signature.name.clone();
+            acquires_map.insert(name.clone(), RefCell::new(fref.signature.acquires.clone()));
+
+            let call_exprs = fref.all_exprs(Some(|e| matches!(e, Expression::FunctionCall(_))));
+
+            let mut calls = BTreeSet::new();
+            for ce in call_exprs {
+                if let Expression::FunctionCall(c) = ce {
+                    calls.insert(c.name.clone());
+                }
+            }
+            call_map.insert(name, calls);
+        }
+
+        let mut updated = true;
+        while updated {
+            updated = false;
+            for (caller, callees) in call_map.iter() {
+                let caller_acquires = acquires_map.get(caller).unwrap();
+                for callee in callees.iter() {
+                    if callee == caller {
+                        continue;
+                    }
+                    let callee_acquires = acquires_map.get(callee).unwrap();
+                    for acq in callee_acquires.borrow().iter() {
+                        if !caller_acquires.borrow().contains(acq) {
+                            caller_acquires.borrow_mut().insert(acq.clone());
+                            updated = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        for f in module.borrow().functions.iter() {
+            let name = f.borrow().signature.name.clone();
+            if let Some(acquires) = acquires_map.get(&name) {
+                f.borrow_mut().signature.acquires = acquires.take();
+            }
+        }
+
         Ok(())
     }
 
@@ -196,11 +242,23 @@ impl MoveSmith {
             }
         }
 
-        function.borrow_mut().signature.acquires.retain(|k, v| {
-            let pieces = v.to_pieces();
-            let block_name = pieces.last().unwrap();
-            body_code.contains(block_name)
-        });
+        // Handles acquires from direct resource operations
+        let mut acquires = BTreeSet::new();
+        let fref = function.borrow();
+        let exprs = fref.all_exprs(Some(|e| matches!(e, Expression::Resource(_))));
+        for expr in exprs {
+            use ResourceOperationKind::*;
+            if let Expression::Resource(r) = expr {
+                if matches!(r.kind, MoveFrom | BorrowGlobal | BorrowGlobalMut) {
+                    // acquires.insert(r.name.clone().unwrap());
+                    acquires.insert(r.typ.get_name());
+                }
+            }
+        }
+        drop(fref);
+
+        function.borrow_mut().signature.acquires = acquires;
+
         Ok(())
     }
 
@@ -682,8 +740,6 @@ impl MoveSmith {
         }
 
         let body = self.generate_block(u, &scope, None, signature.return_type.clone())?;
-        let acquires = self.env_mut().get_and_clean_curr_acquires();
-        function.borrow_mut().signature.acquires = acquires;
         function.borrow_mut().body = Some(body);
         self.post_process_function(u, function)?;
         Ok(())
@@ -759,7 +815,7 @@ impl MoveSmith {
             name,
             parameters,
             return_type,
-            acquires: BTreeMap::new(),
+            acquires: BTreeSet::new(),
         })
     }
 
@@ -887,14 +943,11 @@ impl MoveSmith {
 
     /// Generate a random statement.
     fn generate_statement(&self, u: &mut Unstructured, parent_scope: &Scope) -> Result<Statement> {
-        let weights = vec![6, 4, 2];
+        let weights = vec![6, 4];
         let idx = choose_idx_weighted(u, &weights)?;
         match idx {
             0 => Ok(Statement::Decl(self.generate_declaration(u, parent_scope)?)),
             1 => Ok(Statement::Expr(self.generate_expression(u, parent_scope)?)),
-            2 => Ok(Statement::Resource(
-                self.generate_resource_operation(u, parent_scope)?,
-            )),
             _ => panic!("Invalid statement type"),
         }
     }
@@ -921,23 +974,23 @@ impl MoveSmith {
         let addr = match kind {
             // Only move_to does not require an address
             RK::MoveTo => None,
-            _ => Some(self.generate_expression_of_type(
+            _ => Some(Box::new(self.generate_expression_of_type(
                 u,
                 parent_scope,
                 &Type::Address,
                 true,
                 false,
-            )?),
+            )?)),
         };
 
         let signer = match kind {
-            RK::MoveTo => Some(self.generate_expression_of_type(
+            RK::MoveTo => Some(Box::new(self.generate_expression_of_type(
                 u,
                 parent_scope,
                 &Type::Ref(Box::new(Type::Signer)),
                 true,
                 false,
-            )?),
+            )?)),
             _ => None,
         };
 
@@ -961,16 +1014,15 @@ impl MoveSmith {
         }
 
         let arg = match kind {
-            RK::MoveTo => {
-                Some(self.generate_expression_of_type(u, parent_scope, &typ, true, true)?)
-            },
+            RK::MoveTo => Some(Box::new(self.generate_expression_of_type(
+                u,
+                parent_scope,
+                &typ,
+                true,
+                true,
+            )?)),
             _ => None,
         };
-
-        // Record the type for current function to acqurie
-        if !matches!(kind, RK::MoveTo) && !matches!(kind, RK::Exists) {
-            self.env_mut().record_acquire(&typ, parent_scope);
-        }
 
         Ok(ResourceOperation {
             kind,
@@ -1066,7 +1118,7 @@ impl MoveSmith {
         })
     }
 
-    /// Generate a random expression.
+    /// Generate a random top-level expression (like a statement).
     ///
     /// This is used only for generating statements, so some kinds of expressions are omitted.
     ///
@@ -1109,6 +1161,7 @@ impl MoveSmith {
             5,                // BinaryOperation
             5,                // If-Else
             1,                // Block
+            5,                // ResourceOperation
             func_call_weight, // FunctionCall
             assign_weight,    // Assignment
         ];
@@ -1140,8 +1193,9 @@ impl MoveSmith {
                 let block = self.generate_block(u, parent_scope, None, ret_typ)?;
                 Expression::Block(Box::new(block))
             },
+            3 => Expression::Resource(self.generate_resource_operation(u, parent_scope)?),
             // Generate a function call
-            3 => {
+            4 => {
                 let call = self.generate_function_call(u, parent_scope)?;
                 match call {
                     Some(c) => Expression::FunctionCall(c),
@@ -1149,7 +1203,7 @@ impl MoveSmith {
                 }
             },
             // Generate an assignment expression
-            4 => {
+            5 => {
                 let assign = self.generate_assignment(u, parent_scope)?;
                 match assign {
                     Some(a) => Expression::Assign(Box::new(a)),
@@ -1403,9 +1457,6 @@ impl MoveSmith {
         let mut default_choices: Vec<Expression> = Vec::new();
         // Store candidate expressions for the given type
         let mut choices: Vec<Expression> = Vec::new();
-
-        let mut default_options: Vec<fn(&mut Unstructured) -> Result<Expression>> = vec![];
-        let mut options: Vec<fn(&mut Unstructured) -> Result<Expression>> = vec![];
 
         // Directly generate a value for basic types
         let some_candidate = match typ {
@@ -2102,11 +2153,6 @@ impl MoveSmith {
         }
 
         unregister();
-
-        // TODO: this rely on the fact that we generate leaf functions first
-        // TODO: should implement a proper algorithm for during post processing
-        self.env_mut()
-            .record_acquires(func.acquires.clone(), parent_scope);
 
         trace!("Done generating call to function: {:?}", func.name);
         Ok(FunctionCall {

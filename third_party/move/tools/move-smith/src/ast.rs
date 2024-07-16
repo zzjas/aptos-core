@@ -7,13 +7,13 @@
 //! parser's AST and we might be able to reuse the parser's AST directly.
 
 use crate::{
-    names::{Identifier, IdentifierKind as IDKind, Scope},
+    names::{Identifier, IdentifierKind as IDKind},
     types::{Ability, HasType, Type, TypeArgs, TypeParameters},
     CodeGenerator,
 };
 use arbitrary::Arbitrary;
 use num_bigint::BigUint;
-use std::{cell::RefCell, collections::BTreeMap};
+use std::{cell::RefCell, collections::BTreeSet};
 
 /// The collection of modules and scripts that make up a Move program.
 /// This is the final output of the MoveSmith fuzzer.
@@ -75,7 +75,7 @@ pub struct FunctionSignature {
     /// Block information is needed to remove unnecessary acquires.
     /// We only keep track of the struct name instead of the
     /// full type instantiation with parameters
-    pub acquires: BTreeMap<Identifier, Scope>,
+    pub acquires: BTreeSet<Identifier>,
 }
 
 /// An expression block
@@ -112,7 +112,6 @@ pub enum Statement {
     // Continue,
     Decl(Declaration),
     Expr(Expression),
-    Resource(ResourceOperation),
 }
 
 /// Kinds of global resource storage operations
@@ -136,11 +135,11 @@ pub struct ResourceOperation {
     pub typ: Type,
 
     // For move_to only
-    pub arg: Option<Expression>,
-    pub signer: Option<Expression>,
+    pub arg: Option<Box<Expression>>,
+    pub signer: Option<Box<Expression>>,
 
     // For non move_to operations
-    pub addr: Option<Expression>,
+    pub addr: Option<Box<Expression>>,
 }
 /// An inline struct initialization.
 #[derive(Debug, Clone)]
@@ -187,6 +186,7 @@ pub enum Expression {
     Reference(Box<Expression>),
     Dereference(Box<Expression>),
     MutReference(Box<Expression>),
+    Resource(ResourceOperation),
 }
 
 /// Represents a variable access
@@ -286,4 +286,118 @@ pub struct Constant {
     pub typ: Type,
     pub name: Identifier,
     pub value: Expression,
+}
+
+type ExprFilter = fn(&Expression) -> bool;
+
+#[derive(Debug, Clone, Default)]
+struct ExprCollector<'a> {
+    exprs: Vec<&'a Expression>,
+    filter: Option<ExprFilter>,
+}
+
+impl<'a> ExprCollector<'a> {
+    fn new(filter: Option<ExprFilter>) -> Self {
+        Self {
+            exprs: Vec::new(),
+            filter,
+        }
+    }
+
+    fn visit_function(&mut self, function: &'a Function) {
+        if let Some(body) = &function.body {
+            self.visit_block(body);
+        }
+    }
+
+    fn visit_block(&mut self, block: &'a Block) {
+        for stmt in &block.stmts {
+            self.visit_statement(stmt);
+        }
+        if let Some(expr) = &block.return_expr {
+            self.visit_expr(expr);
+        }
+    }
+
+    fn visit_statement(&mut self, stmt: &'a Statement) {
+        match stmt {
+            Statement::Decl(decl) => {
+                if let Some(value) = &decl.value {
+                    self.visit_expr(value);
+                }
+            },
+            Statement::Expr(e) => {
+                self.visit_expr(e);
+            },
+        }
+    }
+
+    fn visit_expr(&mut self, expr: &'a Expression) {
+        if let Some(filter) = self.filter {
+            if filter(expr) {
+                self.exprs.push(expr);
+            }
+        } else {
+            self.exprs.push(expr);
+        }
+
+        match expr {
+            Expression::FunctionCall(call) => {
+                for arg in &call.args {
+                    self.visit_expr(arg);
+                }
+            },
+            Expression::StructPack(pack) => {
+                for (_, expr) in &pack.fields {
+                    self.visit_expr(expr);
+                }
+            },
+            Expression::Block(block) => {
+                self.visit_block(block);
+            },
+            Expression::Assign(assign) => {
+                self.visit_expr(&assign.value);
+            },
+            Expression::BinaryOperation(binop) => {
+                self.visit_expr(&binop.lhs);
+                self.visit_expr(&binop.rhs);
+            },
+            Expression::IfElse(if_expr) => {
+                self.visit_expr(&if_expr.condition);
+                self.visit_block(&if_expr.body);
+                if let Some(else_expr) = &if_expr.else_expr {
+                    self.visit_block(&else_expr.body);
+                }
+            },
+            Expression::Reference(e) => {
+                self.visit_expr(e);
+            },
+            Expression::Dereference(e) => {
+                self.visit_expr(e);
+            },
+            Expression::MutReference(e) => {
+                self.visit_expr(e);
+            },
+            Expression::Resource(rop) => {
+                if let Some(arg) = &rop.arg {
+                    self.visit_expr(arg);
+                }
+                if let Some(signer) = &rop.signer {
+                    self.visit_expr(signer);
+                }
+                if let Some(addr) = &rop.addr {
+                    self.visit_expr(addr);
+                }
+            },
+            _ => (),
+        }
+    }
+}
+
+impl Function {
+    pub fn all_exprs(&self, filter: Option<ExprFilter>) -> Vec<&Expression> {
+        let mut collector = ExprCollector::new(filter);
+        collector.visit_function(self);
+        collector.exprs
+    }
 }

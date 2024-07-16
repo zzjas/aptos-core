@@ -42,9 +42,6 @@ pub struct Env {
 
     /// Number of fields that has type of another struct
     struct_type_field_counter: usize,
-
-    /// The scope can only be a block
-    pub curr_acquires: BTreeMap<Identifier, Scope>,
 }
 
 /// NOTE: This is unused for now to avoid the situation where the fuzzer cannot
@@ -130,8 +127,6 @@ impl Env {
 
             inline_func_counter: 0,
             struct_type_field_counter: 0,
-
-            curr_acquires: BTreeMap::new(),
         }
     }
 
@@ -289,23 +284,5 @@ impl Env {
     #[inline]
     pub fn reached_struct_type_field_limit(&self) -> bool {
         self.struct_type_field_counter >= self.config.max_num_fields_of_struct_type
-    }
-
-    pub fn record_acquire(&mut self, ty: &Type, scope: &Scope) {
-        self.curr_acquires.insert(ty.get_name(), scope.clone());
-    }
-
-    pub fn record_acquires(&mut self, new_acquires: BTreeMap<Identifier, Scope>, scope: &Scope) {
-        println!("searchme: before extend: {:?}", self.curr_acquires);
-        for (k, v) in new_acquires {
-            self.curr_acquires.insert(k, scope.clone());
-        }
-        println!("searchme: after extend: {:?}", self.curr_acquires);
-    }
-
-    pub fn get_and_clean_curr_acquires(&mut self) -> BTreeMap<Identifier, Scope> {
-        let ret = self.curr_acquires.clone();
-        self.curr_acquires.clear();
-        ret
     }
 }
