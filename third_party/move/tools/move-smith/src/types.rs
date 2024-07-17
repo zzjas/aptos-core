@@ -28,6 +28,9 @@ pub enum Type {
     Vector(Box<Type>),
     Ref(Box<Type>),
     MutRef(Box<Type>),
+    // Very limited use for tuple for now, only used with vector::index_of
+    // TODO: allow all functions to return tuple
+    Tuple(Vec<Type>),
     // Custom types
     Struct(StructType),
     StructConcrete(StructTypeConcrete),
@@ -196,6 +199,15 @@ impl Type {
             },
             Type::Ref(t) => Identifier::new(format!("&{}", t.get_name().name), IDKind::Type),
             Type::MutRef(t) => Identifier::new(format!("&mut {}", t.get_name().name), IDKind::Type),
+            Type::Tuple(ts) => {
+                let mut name = String::from("(");
+                for t in ts {
+                    name.push_str(&t.get_name().name);
+                    name.push_str(", ");
+                }
+                name.push(')');
+                Identifier::new(name, IDKind::Type)
+            },
             Type::Struct(st) => st.name.clone(),
             Type::StructConcrete(st) => st.name.clone(),
             Type::Function(id) => id.clone(),

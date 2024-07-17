@@ -373,11 +373,27 @@ impl CodeGenerator for ResourceOperation {
 
 impl CodeGenerator for Declaration {
     fn emit_code_lines(&self) -> Vec<String> {
+        let vars = match self.names.len() {
+            1 => self.names[0].emit_code(),
+            _ => {
+                let vars: Vec<String> = self.names.iter().map(|id| id.emit_code()).collect();
+                format!("({})", vars.join(", "))
+            },
+        };
+
         let type_anno = match self.emit_type {
-            true => format!(": {}", self.typ.emit_code()),
+            true => match self.typs.len() {
+                1 => format!(": {}", self.typs[0].emit_code()),
+                _ => {
+                    let types: Vec<String> = self.typs.iter().map(|t| t.emit_code()).collect();
+                    format!(": ({})", types.join(", "))
+                },
+            },
             false => "".to_string(),
         };
-        let mut code = vec![format!("let {}{}", self.name.emit_code(), type_anno,)];
+
+        let mut code = vec![format!("let {}{}", vars, type_anno)];
+
         if let Some(ref expr) = self.value {
             code[0].push_str(" = ");
             let rhs = expr.emit_code_lines();
@@ -406,9 +422,7 @@ impl CodeGenerator for Expression {
             Expression::MutReference(expr) => vec![format!("&mut ({})", expr.inline())],
             Expression::Resource(rop) => rop.emit_code_lines(),
             Expression::VectorOperation(vop) => vop.emit_code_lines(),
-            Expression::VectorLiteral(id, vlit) => {
-                vec![format!("let {} = {}", id.inline(), vlit.inline())]
-            },
+            Expression::VectorLiteral(vlit) => vlit.emit_code_lines(),
         }
     }
 }
@@ -446,11 +460,6 @@ impl CodeGenerator for VectorOperation {
     fn emit_code_lines(&self) -> Vec<String> {
         use VectorOperationKind::*;
 
-        let ret_id = match self.ret_id.as_ref() {
-            Some(ident) => format!("let {} = ", ident.inline()),
-            None => "".to_string(),
-        };
-
         let call = match self.op {
             Empty => "empty",
             Singleton => "singleton",
@@ -470,20 +479,6 @@ impl CodeGenerator for VectorOperation {
             SwapRemove => "swap_remove",
         };
 
-        let vec_id = self.vec_id.inline();
-        let ref_mut = match self.op.use_ref() {
-            true => match self.op.use_mut() {
-                true => "&mut ",
-                false => "&",
-            },
-            false => "",
-        };
-
-        let first_arg = match self.op.use_vec_id() {
-            true => format!("{}{}, ", ref_mut, vec_id),
-            false => "".to_string(),
-        };
-
         let mut args = String::new();
         for arg in &self.args {
             args.push_str(&arg.inline());
@@ -492,10 +487,7 @@ impl CodeGenerator for VectorOperation {
 
         let typ = self.elem_typ.inline();
 
-        vec![format!(
-            "{}vector::{}<{}>({}{})",
-            ret_id, call, typ, first_arg, args
-        )]
+        vec![format!("vector::{}<{}>({})", call, typ, args)]
     }
 }
 
@@ -704,6 +696,14 @@ impl CodeGenerator for Type {
             T::Bool => "bool".to_string(),
             T::Ref(t) => format!("&{}", t.inline()),
             T::MutRef(t) => format!("&mut {}", t.inline()),
+            T::Tuple(ts) => {
+                let types = ts
+                    .iter()
+                    .map(|t| t.inline())
+                    .collect::<Vec<String>>()
+                    .join(", ");
+                format!("({})", types)
+            },
             T::Struct(st) => st.name.inline(),
             T::StructConcrete(st) => st.inline(),
             T::TypeParameter(tp) => tp.name.inline(),

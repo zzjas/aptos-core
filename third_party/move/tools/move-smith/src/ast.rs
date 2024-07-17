@@ -167,12 +167,10 @@ impl HasType for StructPack {
 /// Declare a new variable.
 /// Optionally initialize the variable with an expression.
 /// Currently type annotations will always be generated.
-// TODO: Support multiple declarations in a single statement
-// TODO: Randomly ignore type annotation
 #[derive(Debug, Clone)]
 pub struct Declaration {
-    pub typ: Type,
-    pub name: Identifier,
+    pub typs: Vec<Type>,
+    pub names: Vec<Identifier>,
     pub value: Option<Expression>,
     pub emit_type: bool,
 }
@@ -197,7 +195,7 @@ pub enum Expression {
     // The following three are expressions but may contain let bindings
     Resource(ResourceOperation),
     VectorOperation(VectorOperation),
-    VectorLiteral(Identifier, VectorLiteral),
+    VectorLiteral(VectorLiteral),
 }
 
 #[derive(Debug, Clone)]
@@ -210,10 +208,6 @@ pub enum VectorLiteral {
 
 #[derive(Debug, Clone)]
 pub struct VectorOperation {
-    // The ID of the vector
-    pub vec_id: Box<Identifier>,
-    // The ID of the variable to store the result
-    pub ret_id: Option<Identifier>,
     // Type of the underlying elements
     pub elem_typ: Type,
     // The operation kind
@@ -249,23 +243,39 @@ pub enum VectorOperationKind {
     // Filter
 }
 
+/// Represent the type of vector an operation requires i.e. the type of the first argument
+pub enum VecOpVecType {
+    Ref,
+    MutRef,
+    Own,
+    None,
+}
+
 impl VectorOperationKind {
-    pub fn use_vec_id(&self) -> bool {
+    /// Return the type of the vector required for the operation
+    /// This is kept separately from the arguments to avoid generating random expressions
+    /// for the first argument (if any)
+    pub fn op_use_vec_type(&self) -> VecOpVecType {
+        use VecOpVecType::*;
         use VectorOperationKind::*;
-        !matches!(self, Empty | Singleton)
-    }
-
-    pub fn use_ref(&self) -> bool {
-        use VectorOperationKind::*;
-        !matches!(self, Empty | Singleton | DestroyEmpty)
-    }
-
-    pub fn use_mut(&self) -> bool {
-        use VectorOperationKind::*;
-        matches!(
-            self,
-            PushBack | BorrowMut | PopBack | Swap | Reverse | Append | Remove | SwapRemove
-        )
+        match self {
+            Empty => None,
+            Singleton => None,
+            Length => Ref,
+            Borrow => Ref,
+            BorrowMut => MutRef,
+            PushBack => MutRef,
+            PopBack => MutRef,
+            DestroyEmpty => Own,
+            Swap => MutRef,
+            Reverse => MutRef,
+            Append => MutRef,
+            IsEmpty => Ref,
+            Contains => Ref,
+            IndexOf => Ref,
+            Remove => MutRef,
+            SwapRemove => MutRef,
+        }
     }
 
     pub fn has_return(&self) -> bool {
@@ -291,14 +301,13 @@ impl VectorOperationKind {
             Append => None,
             IsEmpty => Some(Type::Bool),
             Contains => Some(Type::Bool),
-            IndexOf => Some(Type::U64),
+            IndexOf => Some(Type::Tuple(vec![Type::Bool, Type::U64])),
             Remove => Some(elem_typ.clone()),
             SwapRemove => Some(elem_typ.clone()),
         }
     }
 
-    /// Return the list of argument types required for the Self operation
-    /// Does not include the vector reference itself
+    /// Return the list of argument types required for the vector operation
     pub fn args_types(&self, elem_typ: &Type) -> Vec<Type> {
         use VectorOperationKind::*;
         match self {
@@ -527,7 +536,7 @@ impl<'a> ExprCollector<'a> {
                     self.visit_expr(arg);
                 }
             },
-            Expression::VectorLiteral(_, VectorLiteral::Multiple(_, exprs)) => {
+            Expression::VectorLiteral(VectorLiteral::Multiple(_, exprs)) => {
                 for expr in exprs {
                     self.visit_expr(expr);
                 }
