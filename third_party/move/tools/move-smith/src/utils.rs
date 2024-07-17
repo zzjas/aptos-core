@@ -160,7 +160,6 @@ pub fn create_move_package(code: String, output_dir: &Path) {
 
     let move_toml_path = output_dir.join("Move.toml");
     let aptos_framework_path = get_aptos_framework_path();
-    println!("searchme: aptos_framework_path: {:?}", aptos_framework_path);
     let move_toml_content = MOVE_TOML_TEMPLATE.replace("$PATH", &aptos_framework_path);
     fs::write(move_toml_path, move_toml_content).expect("Failed to write Move.toml");
 

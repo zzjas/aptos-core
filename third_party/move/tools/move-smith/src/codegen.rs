@@ -343,11 +343,6 @@ impl CodeGenerator for ResourceOperation {
     fn emit_code_lines(&self) -> Vec<String> {
         use ResourceOperationKind::*;
 
-        let id = match self.name.as_ref() {
-            Some(ident) => format!("let {} = ", ident.emit_code()),
-            None => "".to_string(),
-        };
-
         let call = match self.kind {
             MoveTo => "move_to",
             MoveFrom => "move_from",
@@ -358,16 +353,14 @@ impl CodeGenerator for ResourceOperation {
 
         let typ = self.typ.emit_code();
 
-        let args = match self.kind {
-            MoveTo => format!(
-                "{}, {}",
-                self.signer.as_ref().unwrap().inline(),
-                self.arg.as_ref().unwrap().inline()
-            ),
-            _ => self.addr.as_ref().unwrap().inline(),
-        };
+        let args = self
+            .args
+            .iter()
+            .map(|arg| arg.inline())
+            .collect::<Vec<String>>()
+            .join(", ");
 
-        vec![format!("{}{}<{}>({})", id, call, typ, args)]
+        vec![format!("{}<{}>({})", call, typ, args)]
     }
 }
 
@@ -479,11 +472,12 @@ impl CodeGenerator for VectorOperation {
             SwapRemove => "swap_remove",
         };
 
-        let mut args = String::new();
-        for arg in &self.args {
-            args.push_str(&arg.inline());
-            args.push_str(", ");
-        }
+        let args = self
+            .args
+            .iter()
+            .map(|arg| arg.inline())
+            .collect::<Vec<String>>()
+            .join(", ");
 
         let typ = self.elem_typ.inline();
 

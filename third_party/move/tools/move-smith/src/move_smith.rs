@@ -957,12 +957,10 @@ impl MoveSmith {
         u: &mut Unstructured,
         parent_scope: &Scope,
     ) -> Result<Statement> {
-        match bool::arbitrary(u)? {
-            true => Ok(Statement::Expr(
-                self.generate_resource_operation(u, parent_scope)?,
-            )),
-            false => Ok(self.generate_vector_operation(u, parent_scope)?),
-        }
+        Ok(match bool::arbitrary(u)? {
+            true => self.generate_resource_operation(u, parent_scope)?,
+            false => self.generate_vector_operation(u, parent_scope)?,
+        })
     }
 
     /// Generate a random statement.
@@ -1209,7 +1207,7 @@ impl MoveSmith {
         &self,
         u: &mut Unstructured,
         parent_scope: &Scope,
-    ) -> Result<Expression> {
+    ) -> Result<Statement> {
         use ResourceOperationKind as RK;
         let kind = RK::arbitrary(u)?;
 
@@ -1222,29 +1220,6 @@ impl MoveSmith {
 
                 Some(name)
             },
-        };
-
-        let addr = match kind {
-            // Only move_to does not require an address
-            RK::MoveTo => None,
-            _ => Some(Box::new(self.generate_expression_of_type(
-                u,
-                parent_scope,
-                &Type::Address,
-                true,
-                false,
-            )?)),
-        };
-
-        let signer = match kind {
-            RK::MoveTo => Some(Box::new(self.generate_expression_of_type(
-                u,
-                parent_scope,
-                &Type::Ref(Box::new(Type::Signer)),
-                true,
-                false,
-            )?)),
-            _ => None,
         };
 
         let typs = self.get_types_with_abilities(parent_scope, &[Ability::Key], true);
@@ -1260,31 +1235,47 @@ impl MoveSmith {
             RK::Exists => Some(Type::Bool),
         };
 
-        if let Some(ret_typ) = ret_typ {
+        if let Some(ret_typ) = &ret_typ {
             self.env_mut()
                 .type_pool
-                .insert_mapping(&name.clone().unwrap(), &ret_typ);
+                .insert_mapping(&name.clone().unwrap(), ret_typ);
         }
 
-        let arg = match kind {
-            RK::MoveTo => Some(Box::new(self.generate_expression_of_type(
+        let mut args = vec![];
+
+        if !matches!(kind, RK::MoveTo) {
+            // Get address for non-move_to operations
+            args.push(self.generate_expression_of_type(
                 u,
                 parent_scope,
-                &typ,
+                &Type::Address,
                 true,
+                false,
+            )?);
+        } else {
+            // for the move_to operation, we first need a signer
+            // and an item to move
+            args.push(self.generate_expression_of_type(
+                u,
+                parent_scope,
+                &Type::Ref(Box::new(Type::Signer)),
                 true,
-            )?)),
-            _ => None,
-        };
+                false,
+            )?);
+            args.push(self.generate_expression_of_type(u, parent_scope, &typ, true, true)?);
+        }
 
-        Ok(Expression::Resource(ResourceOperation {
-            kind,
-            name,
-            typ,
-            arg,
-            signer,
-            addr,
-        }))
+        let res_op = Expression::Resource(ResourceOperation { kind, typ, args });
+
+        Ok(match name {
+            Some(name) => Statement::Decl(Declaration {
+                names: vec![name],
+                typs: vec![ret_typ.unwrap()],
+                value: Some(res_op),
+                emit_type: true,
+            }),
+            None => Statement::Expr(res_op),
+        })
     }
 
     /// Generate an assignment to an existing variable.
@@ -1414,7 +1405,6 @@ impl MoveSmith {
             3,                // BinaryOperation
             5,                // If-Else
             1,                // Block
-            15,               // ResourceOperation
             func_call_weight, // FunctionCall
             assign_weight,    // Assignment
         ];
@@ -1446,10 +1436,8 @@ impl MoveSmith {
                 let block = self.generate_block(u, parent_scope, None, ret_typ)?;
                 Expression::Block(Box::new(block))
             },
-            // Generate a global resource storage operation
-            3 => self.generate_resource_operation(u, parent_scope)?,
             // Generate a function call
-            4 => {
+            3 => {
                 let call = self.generate_function_call(u, parent_scope)?;
                 match call {
                     Some(c) => Expression::FunctionCall(c),
@@ -1457,7 +1445,7 @@ impl MoveSmith {
                 }
             },
             // Generate an assignment expression
-            5 => {
+            4 => {
                 let assign = self.generate_assignment(u, parent_scope)?;
                 match assign {
                     Some(a) => Expression::Assign(Box::new(a)),

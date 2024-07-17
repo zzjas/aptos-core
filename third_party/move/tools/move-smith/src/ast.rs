@@ -136,18 +136,11 @@ pub enum ResourceOperationKind {
 /// Any return value will be stored in a variable.
 #[derive(Debug, Clone)]
 pub struct ResourceOperation {
-    // move_to doesn't have a return value so we use Option
-    pub name: Option<Identifier>,
     pub kind: ResourceOperationKind,
     pub typ: Type,
-
-    // For move_to only
-    pub arg: Option<Box<Expression>>,
-    pub signer: Option<Box<Expression>>,
-
-    // For non move_to operations
-    pub addr: Option<Box<Expression>>,
+    pub args: Vec<Expression>,
 }
+
 /// An inline struct initialization.
 #[derive(Debug, Clone)]
 pub struct StructPack {
@@ -521,14 +514,8 @@ impl<'a> ExprCollector<'a> {
                 self.visit_expr(e);
             },
             Expression::Resource(rop) => {
-                if let Some(arg) = &rop.arg {
-                    self.visit_expr(arg);
-                }
-                if let Some(signer) = &rop.signer {
-                    self.visit_expr(signer);
-                }
-                if let Some(addr) = &rop.addr {
-                    self.visit_expr(addr);
+                for e in rop.args.iter() {
+                    self.visit_expr(e);
                 }
             },
             Expression::VectorOperation(vop) => {
@@ -537,8 +524,8 @@ impl<'a> ExprCollector<'a> {
                 }
             },
             Expression::VectorLiteral(VectorLiteral::Multiple(_, exprs)) => {
-                for expr in exprs {
-                    self.visit_expr(expr);
+                for e in exprs {
+                    self.visit_expr(e);
                 }
             },
             _ => (),
