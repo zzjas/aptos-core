@@ -453,8 +453,21 @@ impl CodeGenerator for VectorOperation {
 
         let call = match self.op {
             Empty => "empty",
+            Singleton => "singleton",
+            Length => "length",
+            Borrow => "borrow",
+            BorrowMut => "borrow_mut",
+            PushBack => "push_back",
+            PopBack => "pop_back",
+            DestroyEmpty => "destroy_empty",
+            Swap => "swap",
+            Reverse => "reverse",
+            Append => "append",
             IsEmpty => "is_empty",
-            Rotate => "rotate",
+            Contains => "contains",
+            IndexOf => "index_of",
+            Remove => "remove",
+            SwapRemove => "swap_remove",
         };
 
         let vec_id = self.vec_id.inline();

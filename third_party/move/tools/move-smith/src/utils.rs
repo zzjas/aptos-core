@@ -79,6 +79,15 @@ impl fmt::Display for TransactionalResult {
     }
 }
 
+pub fn choose_item_weighted<T>(u: &mut Unstructured, item_weights: &[(T, u32)]) -> Result<T>
+where
+    T: Clone,
+{
+    let weights = item_weights.iter().map(|(_, w)| *w).collect::<Vec<u32>>();
+    let idx = choose_idx_weighted(u, &weights)?;
+    Ok(item_weights[idx].0.clone())
+}
+
 /// Choose a random index based on the given probabilities.
 /// e.g. if `weights` has [10, 20, 20], there are 3 options,
 /// so this function will return 0, 1, or 2.

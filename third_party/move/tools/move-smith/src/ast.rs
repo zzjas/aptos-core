@@ -225,68 +225,99 @@ pub struct VectorOperation {
 #[derive(Debug, Clone)]
 pub enum VectorOperationKind {
     Empty,
+    Singleton,
+    Length,
+    Borrow,
+    BorrowMut,
+    PushBack,
+    PopBack,
+    DestroyEmpty,
+    Swap,
+    Reverse,
+    Append,
     IsEmpty,
-    // Singleton,
-    // Length,
-    // PushBack,
-    // PopBack,
-    // Borrow,
-    // BorrowMut,
-    // DestroyEmpty,
-    // Append,
-    // ReverseAppend,
-    // Contains,
-    // Swap,
-    // Reverse,
-    // ReverseSlice,
-    // IndexOf,
-    // Insert,
-    // Remove,
-    // SwapRemove,
-    // Trim,
-    // TrimReverse,
-    Rotate,
-    // RotateSlice,
+    Contains,
+    IndexOf,
+    Remove,
+    SwapRemove,
+    // The following requires lambda
+    // ForEach,
+    // ForEachRef,
+    // ForEachMut,
+    // Fold
+    // Map
+    // Filter
 }
 
 impl VectorOperationKind {
     pub fn use_vec_id(&self) -> bool {
         use VectorOperationKind::*;
-        !matches!(self, Empty)
-    }
-
-    pub fn has_return(&self) -> bool {
-        use VectorOperationKind::*;
-        matches!(self, IsEmpty)
+        !matches!(self, Empty | Singleton)
     }
 
     pub fn use_ref(&self) -> bool {
         use VectorOperationKind::*;
-        matches!(self, IsEmpty | Rotate)
+        !matches!(self, Empty | Singleton | DestroyEmpty)
     }
 
     pub fn use_mut(&self) -> bool {
         use VectorOperationKind::*;
-        matches!(self, Rotate)
+        matches!(
+            self,
+            PushBack | BorrowMut | PopBack | Swap | Reverse | Append | Remove | SwapRemove
+        )
+    }
+
+    pub fn has_return(&self) -> bool {
+        self.ret_type(&Type::U8).is_some()
     }
 
     pub fn ret_type(&self, elem_typ: &Type) -> Option<Type> {
         use VectorOperationKind::*;
+        let vec_typ = Type::Vector(Box::new(elem_typ.clone()));
+        let elem_ref = Type::Ref(Box::new(elem_typ.clone()));
+        let elem_mutref = Type::MutRef(Box::new(elem_typ.clone()));
         match self {
+            Empty => Some(vec_typ),
+            Singleton => Some(vec_typ),
+            Length => Some(Type::U64),
+            Borrow => Some(elem_ref),
+            BorrowMut => Some(elem_mutref),
+            PushBack => None,
+            PopBack => Some(elem_typ.clone()),
+            DestroyEmpty => None,
+            Swap => None,
+            Reverse => None,
+            Append => None,
             IsEmpty => Some(Type::Bool),
-            Rotate => Some(Type::U64),
-            Empty => Some(Type::Vector(Box::new(elem_typ.clone()))),
+            Contains => Some(Type::Bool),
+            IndexOf => Some(Type::U64),
+            Remove => Some(elem_typ.clone()),
+            SwapRemove => Some(elem_typ.clone()),
         }
     }
 
     /// Return the list of argument types required for the Self operation
     /// Does not include the vector reference itself
-    pub fn args_types(&self, _elem_typ: &Type) -> Vec<Type> {
+    pub fn args_types(&self, elem_typ: &Type) -> Vec<Type> {
         use VectorOperationKind::*;
         match self {
             Empty => vec![],
+            Singleton => vec![elem_typ.clone()],
+            Length => vec![],
+            Borrow => vec![Type::U64],
+            BorrowMut => vec![Type::U64],
+            PushBack => vec![elem_typ.clone()],
+            PopBack => vec![],
+            DestroyEmpty => vec![],
+            Swap => vec![Type::U64, Type::U64],
+            Reverse => vec![],
+            Append => vec![Type::Vector(Box::new(elem_typ.clone()))],
             IsEmpty => vec![],
-            Rotate => vec![Type::U64],
+            Contains => vec![Type::Ref(Box::new(elem_typ.clone()))],
+            IndexOf => vec![Type::Ref(Box::new(elem_typ.clone()))],
+            Remove => vec![Type::U64],
+            SwapRemove => vec![Type::U64],
         }
     }
 }

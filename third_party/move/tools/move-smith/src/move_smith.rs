@@ -27,7 +27,7 @@ use crate::{
         Ability, HasType, StructType, StructTypeConcrete, Type, TypeArgs, TypeParameter,
         TypeParameters,
     },
-    utils::choose_idx_weighted,
+    utils::{choose_idx_weighted, choose_item_weighted},
 };
 use arbitrary::{Arbitrary, Error, Result, Unstructured};
 use log::{info, trace, warn};
@@ -982,10 +982,12 @@ impl MoveSmith {
         &self,
         u: &mut Unstructured,
         parent_scope: &Scope,
+        vec_op: Option<VectorOperationKind>,
     ) -> Result<Expression> {
         let (name, _) = self.get_next_identifier(IDKinds::Var, parent_scope);
 
         let weight = [
+            10, // Use stdlib constructor
             10, // Random type empty vector
             10, // Random type non-empty vector
             5,  // Byte string
@@ -995,7 +997,7 @@ impl MoveSmith {
 
         // Generate element type and record return type in environment
         let typ = match idx {
-            0 | 1 => {
+            0 | 1 | 2 => {
                 let typ = self.get_random_type(u, parent_scope, true, true, true, true, false)?;
                 let con_typ = self
                     .concretize_type(u, &typ, parent_scope, vec![], None)
@@ -1005,7 +1007,7 @@ impl MoveSmith {
                     .insert_mapping(&name, &Type::Vector(Box::new(con_typ.clone())));
                 Some(con_typ)
             },
-            2 | 3 => {
+            3 | 4 => {
                 self.env_mut()
                     .type_pool
                     .insert_mapping(&name, &Type::Vector(Box::new(Type::U8)));
@@ -1014,9 +1016,39 @@ impl MoveSmith {
             _ => panic!("Invalid new vector type"),
         };
 
-        let literal = match idx {
-            0 => VectorLiteral::Empty(typ.unwrap()),
-            1 => {
+        let expr = match idx {
+            0 => {
+                use VectorOperationKind::*;
+                let op = match vec_op {
+                    Some(op @ Empty) => op,
+                    Some(op @ Singleton) => op,
+                    _ => match bool::arbitrary(u)? {
+                        true => Singleton,
+                        false => Empty,
+                    },
+                };
+
+                let args = match op {
+                    Empty => vec![],
+                    Singleton => vec![self.generate_expression_of_type(
+                        u,
+                        parent_scope,
+                        typ.as_ref().unwrap(),
+                        true,
+                        false,
+                    )?],
+                    _ => panic!("Invalid vector operation"),
+                };
+                Expression::VectorOperation(VectorOperation {
+                    vec_id: Box::new(Identifier::new_str("placeholder", IDKinds::Var)),
+                    ret_id: Some(name),
+                    elem_typ: typ.unwrap(),
+                    op,
+                    args,
+                })
+            },
+            1 => Expression::VectorLiteral(name, VectorLiteral::Empty(typ.unwrap())),
+            2 => {
                 let typ = typ.unwrap();
                 let mut elems = vec![];
                 // Choose a small size for the initial vector length
@@ -1029,9 +1061,9 @@ impl MoveSmith {
                         false,
                     )?);
                 }
-                VectorLiteral::Multiple(typ, elems)
+                Expression::VectorLiteral(name, VectorLiteral::Multiple(typ, elems))
             },
-            2 => {
+            3 => {
                 let mut s = String::new();
                 for _ in 0..u.int_in_range(1..=self.env().config.max_hex_byte_str_size)? {
                     if u.int_in_range(0..=10)? > 8 {
@@ -1062,19 +1094,19 @@ impl MoveSmith {
                         s.push(c);
                     }
                 }
-                VectorLiteral::ByteString(s)
+                Expression::VectorLiteral(name, VectorLiteral::ByteString(s))
             },
-            3 => {
+            4 => {
                 let mut hex = String::new();
                 for _ in 0..u.int_in_range(1..=self.env().config.max_hex_byte_str_size)? {
                     hex.push_str(&format!("{:02x}", u8::arbitrary(u)?));
                 }
-                VectorLiteral::HexString(hex)
+                Expression::VectorLiteral(name, VectorLiteral::HexString(hex))
             },
             _ => panic!("Invalid vector operation"),
         };
-        trace!("Generated vector literal: {}", literal.inline());
-        Ok(Expression::VectorLiteral(name, literal))
+        trace!("Generated new vector: {}", expr.inline());
+        Ok(expr)
     }
 
     fn generate_vector_operation(
@@ -1082,12 +1114,20 @@ impl MoveSmith {
         u: &mut Unstructured,
         parent_scope: &Scope,
     ) -> Result<Expression> {
+        use VectorOperationKind::*;
+
+        let op = self.random_vector_operation_kind(u)?;
         let vec_ids = self.env().get_vector_identifiers(parent_scope);
 
         // Create vectors first, 3 is arbitrarily chosen
-        if vec_ids.is_empty() {
+        let num_vecs_needed = match op {
+            Append => 2,
+            _ => 1,
+        };
+
+        if vec_ids.len() < num_vecs_needed || matches!(op, Empty | Singleton) {
             trace!("Creating new vector, now has: {}", vec_ids.len());
-            return self.generate_new_vector(u, parent_scope);
+            return self.generate_new_vector(u, parent_scope, Some(op));
         }
 
         let vec_id = u.choose(&vec_ids)?.clone();
@@ -1096,8 +1136,6 @@ impl MoveSmith {
             Some(Type::Vector(inner)) => inner.as_ref().clone(),
             _ => panic!("Invalid vector type"),
         };
-
-        let op = self.random_vector_operation_kind(u)?;
 
         let ret_id = if op.has_return() {
             let (name, _) = self.get_next_identifier(IDKinds::Var, parent_scope);
@@ -1132,13 +1170,25 @@ impl MoveSmith {
 
     fn random_vector_operation_kind(&self, u: &mut Unstructured) -> Result<VectorOperationKind> {
         use VectorOperationKind::*;
-        let weight = vec![10, 10, 10];
-        match choose_idx_weighted(u, &weight)? {
-            0 => Ok(Empty),
-            1 => Ok(IsEmpty),
-            2 => Ok(Rotate),
-            _ => panic!("Invalid vector operation kind"),
-        }
+        let op_weights = vec![
+            (Empty, 15),
+            (Singleton, 15),
+            (Length, 10),
+            (Borrow, 10),
+            (BorrowMut, 10),
+            (PushBack, 10),
+            (PopBack, 2),
+            (DestroyEmpty, 2),
+            (Swap, 10),
+            (Reverse, 10),
+            (Append, 10),
+            (IsEmpty, 10),
+            (Contains, 10),
+            (IndexOf, 10),
+            (Remove, 5),
+            (SwapRemove, 5),
+        ];
+        choose_item_weighted(u, &op_weights)
     }
 
     fn generate_resource_operation(
