@@ -146,13 +146,37 @@ impl Env {
         ident_kind: Option<IDKind>,
         scope: Option<&Scope>,
     ) -> Vec<Identifier> {
+        let mut ids = self.get_identifiers_all(typ, ident_kind, scope);
+        ids.retain(|id| !matches!(self.type_pool.get_type(id), Some(Type::Vector(_))));
+        ids
+    }
+
+    pub fn get_vector_identifiers(&self, scope: &Scope) -> Vec<Identifier> {
+        let mut ids = self.get_identifiers_all(None, Some(IDKind::Var), Some(scope));
+        ids.retain(|id| matches!(self.type_pool.get_type(id), Some(Type::Vector(_))));
+        ids
+    }
+
+    fn get_identifiers_all(
+        &self,
+        typ: Option<&Type>,
+        ident_kind: Option<IDKind>,
+        scope: Option<&Scope>,
+    ) -> Vec<Identifier> {
+        trace!(
+            "Getting identifiers with constraints: typ ({:?}), kind ({:?}), scope ({:?})",
+            typ,
+            ident_kind,
+            scope,
+        );
+
         // Filter based on the IDKind
         let all_ident = match ident_kind {
             Some(ref t) => self.id_pool.get_identifiers_of_ident_kind(t.clone()),
             None => self.id_pool.get_all_identifiers(),
         };
         trace!(
-            "All identifiers of type {:?}: {:?}",
+            "After filtering identifier kind {:?}, {} identifiers remined",
             ident_kind,
             all_ident.len()
         );
@@ -163,7 +187,7 @@ impl Env {
             None => all_ident,
         };
         trace!(
-            "In scope identifiers at {:?}: {:?}",
+            "After filtering scope {:?}, {} identifiers remined",
             scope,
             ident_in_scope.len()
         );
@@ -175,6 +199,11 @@ impl Env {
                 .filter_identifier_with_type(t, ident_in_scope),
             None => ident_in_scope,
         };
+        trace!(
+            "After filtering type {:?}, {} identifiers remined",
+            typ,
+            type_matched.len()
+        );
 
         // Filter out the identifiers that do not have a type
         // i.e. the one just declared but the RHS of assign is not finished yet

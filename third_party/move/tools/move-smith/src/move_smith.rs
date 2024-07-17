@@ -950,6 +950,164 @@ impl MoveSmith {
         }
     }
 
+    fn generate_new_vector(
+        &self,
+        u: &mut Unstructured,
+        parent_scope: &Scope,
+    ) -> Result<Expression> {
+        let (name, _) = self.get_next_identifier(IDKinds::Var, parent_scope);
+
+        let weight = [
+            10, // Random type empty vector
+            10, // Random type non-empty vector
+            5,  // Byte string
+            5,  // Hex string
+        ];
+        let idx = choose_idx_weighted(u, &weight)?;
+
+        // Generate element type and record return type in environment
+        let typ = match idx {
+            0 | 1 => {
+                let typ = self.get_random_type(u, parent_scope, true, true, true, true, false)?;
+                let con_typ = self
+                    .concretize_type(u, &typ, parent_scope, vec![], None)
+                    .unwrap_or(typ);
+                self.env_mut()
+                    .type_pool
+                    .insert_mapping(&name, &Type::Vector(Box::new(con_typ.clone())));
+                Some(con_typ)
+            },
+            2 | 3 => {
+                self.env_mut()
+                    .type_pool
+                    .insert_mapping(&name, &Type::Vector(Box::new(Type::U8)));
+                None
+            },
+            _ => panic!("Invalid new vector type"),
+        };
+
+        let literal = match idx {
+            0 => VectorLiteral::Empty(typ.unwrap()),
+            1 => {
+                let typ = typ.unwrap();
+                let mut elems = vec![];
+                // Choose a small size for the initial vector length
+                for _ in 0..u.int_in_range(1..=3)? {
+                    elems.push(self.generate_expression_of_type(
+                        u,
+                        parent_scope,
+                        &typ,
+                        true,
+                        false,
+                    )?);
+                }
+                VectorLiteral::Multiple(typ, elems)
+            },
+            2 => {
+                let mut s = String::new();
+                for _ in 0..u.int_in_range(1..=self.env().config.max_hex_byte_str_size)? {
+                    if u.int_in_range(0..=10)? > 8 {
+                        // Choose an escape character
+                        let idx = u.int_in_range(0..=6)?;
+                        let hex_escape = match idx {
+                            6 => format!("\\x{:02x}", u8::arbitrary(u)?),
+                            _ => String::new(),
+                        };
+
+                        let c = match idx {
+                            0 => "\\n",
+                            1 => "\\r",
+                            2 => "\\t",
+                            3 => "\\\\",
+                            4 => "\\0",
+                            5 => "\\\"",
+                            6 => &hex_escape,
+                            _ => panic!("Invalid escape character choice"),
+                        };
+                        s.push_str(c);
+                    } else {
+                        // Choose a random ascii
+                        let c = u.int_in_range(32..=126)? as u8 as char;
+                        if c == '"' || c == '\\' {
+                            s.push('\\');
+                        }
+                        s.push(c);
+                    }
+                }
+                VectorLiteral::ByteString(s)
+            },
+            3 => {
+                let mut hex = String::new();
+                for _ in 0..u.int_in_range(1..=self.env().config.max_hex_byte_str_size)? {
+                    hex.push_str(&format!("{:02x}", u8::arbitrary(u)?));
+                }
+                VectorLiteral::HexString(hex)
+            },
+            _ => panic!("Invalid vector operation"),
+        };
+        trace!("Generated vector literal: {}", literal.inline());
+        Ok(Expression::VectorLiteral(name, literal))
+    }
+
+    fn generate_vector_operation(
+        &self,
+        u: &mut Unstructured,
+        parent_scope: &Scope,
+    ) -> Result<Expression> {
+        let vec_ids = self.env().get_vector_identifiers(parent_scope);
+
+        // Create vectors first, 3 is arbitrarily chosen
+        if vec_ids.len() <= 2 {
+            trace!("Creating new vector, now has: {}", vec_ids.len());
+            return self.generate_new_vector(u, parent_scope);
+        }
+
+        let vec_id = u.choose(&vec_ids)?.clone();
+
+        let elem_typ = match self.env().type_pool.get_type(&vec_id) {
+            Some(Type::Vector(inner)) => inner.as_ref().clone(),
+            _ => panic!("Invalid vector type"),
+        };
+
+        let op = self.random_vector_operation_kind(u)?;
+
+        let ret_id = if op.has_return() {
+            let (name, _) = self.get_next_identifier(IDKinds::Var, parent_scope);
+            self.env_mut().live_vars.mark_alive(parent_scope, &name);
+
+            // record the return type
+            let ret_typ = op.ret_type(&elem_typ).expect("Must has return type");
+            self.env_mut().type_pool.insert_mapping(&name, &ret_typ);
+            Some(name)
+        } else {
+            None
+        };
+
+        let mut args = vec![];
+        for arg_type in op.args_types() {
+            args.push(self.generate_expression_of_type(u, parent_scope, &arg_type, true, false)?);
+        }
+
+        Ok(Expression::VectorOperation(VectorOperation {
+            vec_id: Box::new(vec_id),
+            ret_id,
+            elem_typ,
+            op,
+            args,
+        }))
+    }
+
+    fn random_vector_operation_kind(&self, u: &mut Unstructured) -> Result<VectorOperationKind> {
+        use VectorOperationKind::*;
+        let weight = vec![10, 10, 10];
+        match choose_idx_weighted(u, &weight)? {
+            0 => Ok(Empty),
+            1 => Ok(IsEmpty),
+            2 => Ok(Rotate),
+            _ => panic!("Invalid vector operation kind"),
+        }
+    }
+
     fn generate_resource_operation(
         &self,
         u: &mut Unstructured,
@@ -1156,10 +1314,11 @@ impl MoveSmith {
 
         // Decides how often each expression type should be generated
         let weights = vec![
-            5,                // BinaryOperation
+            3,                // BinaryOperation
             5,                // If-Else
             1,                // Block
-            5,                // ResourceOperation
+            15,               // ResourceOperation
+            15,               // VectorOperation
             func_call_weight, // FunctionCall
             assign_weight,    // Assignment
         ];
@@ -1191,9 +1350,12 @@ impl MoveSmith {
                 let block = self.generate_block(u, parent_scope, None, ret_typ)?;
                 Expression::Block(Box::new(block))
             },
+            // Generate a global resource storage operation
             3 => Expression::Resource(self.generate_resource_operation(u, parent_scope)?),
+            // Generate a vector operation
+            4 => self.generate_vector_operation(u, parent_scope)?,
             // Generate a function call
-            4 => {
+            5 => {
                 let call = self.generate_function_call(u, parent_scope)?;
                 match call {
                     Some(c) => Expression::FunctionCall(c),
@@ -1201,7 +1363,7 @@ impl MoveSmith {
                 }
             },
             // Generate an assignment expression
-            5 => {
+            6 => {
                 let assign = self.generate_assignment(u, parent_scope)?;
                 match assign {
                     Some(a) => Expression::Assign(Box::new(a)),
@@ -1501,6 +1663,10 @@ impl MoveSmith {
             // We handle references separately after checking for variables
             Type::Ref(_) => None,
             Type::MutRef(_) => None,
+            Type::Vector(_) => {
+                assert!(allow_var || allow_call);
+                None
+            },
             _ => unimplemented!(),
         };
 

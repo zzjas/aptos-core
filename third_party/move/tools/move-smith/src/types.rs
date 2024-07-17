@@ -150,6 +150,10 @@ impl Type {
         self.is_ref() || self.is_mut_ref()
     }
 
+    pub fn is_vector(&self) -> bool {
+        matches!(self, Type::Vector(_))
+    }
+
     /// Check if the type is a type parameter
     pub fn is_type_parameter(&self) -> bool {
         matches!(self, Type::TypeParameter(_))

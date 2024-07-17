@@ -24,6 +24,9 @@ use tokio::runtime::Runtime;
 const MOVE_TOML_TEMPLATE: &str = r#"[package]
 name = "test"
 version = "0.0.0"
+
+[dependencies]
+AptosFramework = { local = "$PATH" }
 "#;
 
 /// The result of running a transactional test.
@@ -133,13 +136,24 @@ fn create_tmp_move_file(code: String, name_hint: Option<&str>) -> (PathBuf, Temp
     (file_path, dir)
 }
 
+fn get_aptos_framework_path() -> String {
+    let crate_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let relative_path =
+        crate_dir.join("../../../../../aptos-core/aptos-move/framework/aptos-framework/");
+    let absolute_path = relative_path.canonicalize().unwrap();
+    absolute_path.to_str().unwrap().to_string()
+}
+
 /// Create a Move package with the given code and minimal Move.toml.
 pub fn create_move_package(code: String, output_dir: &Path) {
     let source_dir = output_dir.join("sources");
     fs::create_dir_all(&source_dir).expect("Failed to create package directory");
 
     let move_toml_path = output_dir.join("Move.toml");
-    fs::write(move_toml_path, MOVE_TOML_TEMPLATE).expect("Failed to write Move.toml");
+    let aptos_framework_path = get_aptos_framework_path();
+    println!("searchme: aptos_framework_path: {:?}", aptos_framework_path);
+    let move_toml_content = MOVE_TOML_TEMPLATE.replace("$PATH", &aptos_framework_path);
+    fs::write(move_toml_path, move_toml_content).expect("Failed to write Move.toml");
 
     let move_path = source_dir.join("MoveSmith.move");
     fs::write(move_path, code).expect("Failed to write the Move file");

@@ -56,6 +56,9 @@ pub struct Config {
 
     // Allow recursive calls in the generated code
     pub allow_recursive_calls: bool,
+
+    // Maximum number of bytes to construct hex or byte string
+    pub max_hex_byte_str_size: usize,
 }
 
 impl Default for Config {
@@ -126,6 +129,8 @@ impl Default for Config {
             transactional_timeout_sec: 10,
 
             allow_recursive_calls: false,
+
+            max_hex_byte_str_size: 32,
         }
     }
 }

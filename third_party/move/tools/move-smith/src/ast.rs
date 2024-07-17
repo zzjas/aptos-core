@@ -186,7 +186,96 @@ pub enum Expression {
     Reference(Box<Expression>),
     Dereference(Box<Expression>),
     MutReference(Box<Expression>),
+
+    // The following three are expressions but may contain let bindings
     Resource(ResourceOperation),
+    VectorOperation(VectorOperation),
+    VectorLiteral(Identifier, VectorLiteral),
+}
+
+#[derive(Debug, Clone)]
+pub enum VectorLiteral {
+    Empty(Type),
+    Multiple(Type, Vec<Expression>),
+    ByteString(String), // Must be ASCII
+    HexString(String),
+}
+
+#[derive(Debug, Clone)]
+pub struct VectorOperation {
+    // The ID of the vector
+    pub vec_id: Box<Identifier>,
+    // The ID of the variable to store the result
+    pub ret_id: Option<Identifier>,
+    // Type of the underlying elements
+    pub elem_typ: Type,
+    // The operation kind
+    pub op: VectorOperationKind,
+    // The arguments to the operation, if needed
+    pub args: Vec<Expression>,
+}
+
+#[derive(Debug, Clone)]
+pub enum VectorOperationKind {
+    Empty,
+    IsEmpty,
+    // Singleton,
+    // Length,
+    // PushBack,
+    // PopBack,
+    // Borrow,
+    // BorrowMut,
+    // DestroyEmpty,
+    // Append,
+    // ReverseAppend,
+    // Contains,
+    // Swap,
+    // Reverse,
+    // ReverseSlice,
+    // IndexOf,
+    // Insert,
+    // Remove,
+    // SwapRemove,
+    // Trim,
+    // TrimReverse,
+    Rotate,
+    // RotateSlice,
+}
+
+impl VectorOperationKind {
+    pub fn has_return(&self) -> bool {
+        use VectorOperationKind::*;
+        matches!(self, IsEmpty)
+    }
+
+    pub fn use_mut(&self) -> bool {
+        use VectorOperationKind::*;
+        matches!(self, Rotate)
+    }
+
+    pub fn ret_type(&self, elem_typ: &Type) -> Option<Type> {
+        use VectorOperationKind::*;
+        match self {
+            IsEmpty => Some(Type::Bool),
+            Rotate => Some(Type::U64),
+            Empty => Some(Type::Vector(Box::new(elem_typ.clone()))),
+        }
+    }
+
+    /// Return the list of argument types required for the Self operation
+    /// Does not include the vector reference itself
+    pub fn args_types(&self) -> Vec<Type> {
+        use VectorOperationKind::*;
+        if !self.has_return() {
+            return vec![];
+        }
+
+        match self {
+            Empty => vec![],
+            IsEmpty => vec![],
+            Rotate => vec![Type::U64],
+        }
+    }
 }
 
 /// Represents a variable access

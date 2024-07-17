@@ -5,7 +5,10 @@
 //! with random content controlled by a seed.
 
 use clap::Parser;
-use move_smith::{utils::raw_to_compile_unit, CodeGenerator};
+use move_smith::{
+    utils::{create_move_package, raw_to_compile_unit},
+    CodeGenerator,
+};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::{fs, path::PathBuf};
 
@@ -31,10 +34,6 @@ struct Args {
 
 const BUFFER_SIZE_START: usize = 1024 * 8;
 const BUFFER_SIZE_MAX: usize = 1024 * 32;
-const MOVE_TOML_TEMPLATE: &str = r#"[package]
-name = "test"
-version = "0.0.0"
-"#;
 
 fn main() {
     env_logger::init();
@@ -71,24 +70,12 @@ fn main() {
         };
         println!("Generated MoveSmith instance with {} bytes", buffer_size);
 
-        let file_name = format!("Output_{}.move", i);
-        let (file_path, buffer_file_path) = match args.package {
-            true => {
-                let package_dir = args.output_dir.join(format!("Package_{}", i));
-                let source_dir = package_dir.join("sources");
-                fs::create_dir_all(&source_dir).expect("Failed to create package directory");
-
-                let move_toml_path = package_dir.join("Move.toml");
-                fs::write(&move_toml_path, MOVE_TOML_TEMPLATE).expect("Failed to write Move.toml");
-                // Write the Move source code
-                (source_dir.join(file_name), package_dir.join("buffer.raw"))
-            },
-            false => (
-                args.output_dir.join(file_name),
-                args.output_dir.join(format!("buffer_{}.raw", i)),
-            ),
-        };
-        fs::write(&file_path, code).expect("Failed to write the Move file");
+        let mut buffer_file_path = args.output_dir.join(format!("buffer_{}.raw", i));
+        if args.package {
+            let package_dir = args.output_dir.join(format!("Package_{}", i));
+            create_move_package(code, &package_dir);
+            buffer_file_path = package_dir.join("buffer.raw");
+        }
         fs::write(&buffer_file_path, buffer).expect("Failed to write the raw buffer file");
     }
 

@@ -395,7 +395,72 @@ impl CodeGenerator for Expression {
             Expression::Dereference(expr) => vec![format!("*({})", expr.inline())],
             Expression::MutReference(expr) => vec![format!("&mut ({})", expr.inline())],
             Expression::Resource(rop) => rop.emit_code_lines(),
+            Expression::VectorOperation(vop) => vop.emit_code_lines(),
+            Expression::VectorLiteral(id, vlit) => {
+                vec![format!("let {} = {}", id.inline(), vlit.inline())]
+            },
         }
+    }
+}
+
+impl CodeGenerator for VectorLiteral {
+    fn emit_code_lines(&self) -> Vec<String> {
+        match self {
+            VectorLiteral::Empty(t) => {
+                vec![format!("vector<{}>[]", t.inline())]
+            },
+            VectorLiteral::Multiple(_, elems) => {
+                let mut code = vec!["vector[".to_string()];
+                for elem in elems {
+                    append_code_lines_with_indentation(
+                        &mut code,
+                        elem.emit_code_lines(),
+                        INDENTATION_SIZE,
+                    );
+                    code.last_mut().unwrap().push(',');
+                }
+                code.push(']'.to_string());
+                code
+            },
+            VectorLiteral::ByteString(s) => {
+                vec![format!("b\"{}\"", s)]
+            },
+            VectorLiteral::HexString(s) => {
+                vec![format!("x\"{}\"", s)]
+            },
+        }
+    }
+}
+
+impl CodeGenerator for VectorOperation {
+    fn emit_code_lines(&self) -> Vec<String> {
+        use VectorOperationKind::*;
+
+        let ret_id = match self.ret_id.as_ref() {
+            Some(ident) => format!("let {} = ", ident.inline()),
+            None => "".to_string(),
+        };
+
+        let call = match self.op {
+            Empty => "empty",
+            IsEmpty => "is_empty",
+            Rotate => "rotate",
+        };
+
+        let vec_id = self.vec_id.inline();
+
+        let use_mut = if self.op.use_mut() { "&mut " } else { "" };
+
+        let mut args = String::new();
+        for arg in &self.args {
+            args.push_str(&arg.inline());
+            args.push_str(", ");
+        }
+
+        vec![format!(
+            "{}vector::{}({}{}, {})",
+            ret_id, call, use_mut, vec_id, args
+        )]
     }
 }
 
@@ -609,6 +674,7 @@ impl CodeGenerator for Type {
             T::TypeParameter(tp) => tp.name.inline(),
             T::Address => "address".to_string(),
             T::Signer => "signer".to_string(),
+            T::Vector(t) => format!("vector<{}>", t.inline()),
             _ => unimplemented!(),
         }]
     }
