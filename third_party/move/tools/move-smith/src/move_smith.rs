@@ -322,6 +322,10 @@ impl MoveSmith {
         info!("Done generating function skeletons");
 
         Ok(Module {
+            uses: vec![Use {
+                address: "0x1".to_string(),
+                module: Identifier::new_str("vector", IDKinds::Module),
+            }],
             name,
             functions,
             structs,
@@ -931,12 +935,36 @@ impl MoveSmith {
     ) -> Result<Vec<Statement>> {
         trace!("Generating {} statements", num_stmts);
         let mut stmts = Vec::new();
+        let mut num_addtional =
+            u.int_in_range(0..=self.env().config.max_num_additional_operations_in_func)?;
+
         for i in 0..num_stmts {
             trace!("Generating statement #{}", i + 1);
-            stmts.push(self.generate_statement(u, parent_scope)?);
+            if num_addtional > 0 && bool::arbitrary(u)? {
+                stmts.push(self.generate_additional_operation(u, parent_scope)?);
+                num_addtional -= 1;
+            } else {
+                stmts.push(self.generate_statement(u, parent_scope)?);
+            }
+
             trace!("Done generating statement #{}", i + 1);
         }
         Ok(stmts)
+    }
+
+    fn generate_additional_operation(
+        &self,
+        u: &mut Unstructured,
+        parent_scope: &Scope,
+    ) -> Result<Statement> {
+        match bool::arbitrary(u)? {
+            true => Ok(Statement::Expr(
+                self.generate_resource_operation(u, parent_scope)?,
+            )),
+            false => Ok(Statement::Expr(
+                self.generate_vector_operation(u, parent_scope)?,
+            )),
+        }
     }
 
     /// Generate a random statement.
@@ -1057,7 +1085,7 @@ impl MoveSmith {
         let vec_ids = self.env().get_vector_identifiers(parent_scope);
 
         // Create vectors first, 3 is arbitrarily chosen
-        if vec_ids.len() <= 2 {
+        if vec_ids.is_empty() {
             trace!("Creating new vector, now has: {}", vec_ids.len());
             return self.generate_new_vector(u, parent_scope);
         }
@@ -1084,9 +1112,14 @@ impl MoveSmith {
         };
 
         let mut args = vec![];
-        for arg_type in op.args_types() {
+        for arg_type in op.args_types(&elem_typ) {
             args.push(self.generate_expression_of_type(u, parent_scope, &arg_type, true, false)?);
         }
+        trace!(
+            "Generated arguments for vector operation {:?}: {:?}",
+            op,
+            args
+        );
 
         Ok(Expression::VectorOperation(VectorOperation {
             vec_id: Box::new(vec_id),
@@ -1112,7 +1145,7 @@ impl MoveSmith {
         &self,
         u: &mut Unstructured,
         parent_scope: &Scope,
-    ) -> Result<ResourceOperation> {
+    ) -> Result<Expression> {
         use ResourceOperationKind as RK;
         let kind = RK::arbitrary(u)?;
 
@@ -1180,14 +1213,14 @@ impl MoveSmith {
             _ => None,
         };
 
-        Ok(ResourceOperation {
+        Ok(Expression::Resource(ResourceOperation {
             kind,
             name,
             typ,
             arg,
             signer,
             addr,
-        })
+        }))
     }
 
     /// Generate an assignment to an existing variable.
@@ -1351,7 +1384,7 @@ impl MoveSmith {
                 Expression::Block(Box::new(block))
             },
             // Generate a global resource storage operation
-            3 => Expression::Resource(self.generate_resource_operation(u, parent_scope)?),
+            3 => self.generate_resource_operation(u, parent_scope)?,
             // Generate a vector operation
             4 => self.generate_vector_operation(u, parent_scope)?,
             // Generate a function call

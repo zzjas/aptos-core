@@ -131,6 +131,10 @@ impl CodeGenerator for Module {
             format!("module 0xCAFE::{} {{", self.name.emit_code()),
         ];
 
+        for u in &self.uses {
+            append_code_lines_with_indentation(&mut code, u.emit_code_lines(), INDENTATION_SIZE);
+        }
+
         for c in &self.constants {
             append_code_lines_with_indentation(&mut code, c.emit_code_lines(), INDENTATION_SIZE);
         }
@@ -153,6 +157,12 @@ impl CodeGenerator for Module {
 
         code.push("}\n".to_string());
         code
+    }
+}
+
+impl CodeGenerator for Use {
+    fn emit_code_lines(&self) -> Vec<String> {
+        vec![format!("use {}::{};", self.address, self.module.inline())]
     }
 }
 
@@ -448,8 +458,18 @@ impl CodeGenerator for VectorOperation {
         };
 
         let vec_id = self.vec_id.inline();
+        let ref_mut = match self.op.use_ref() {
+            true => match self.op.use_mut() {
+                true => "&mut ",
+                false => "&",
+            },
+            false => "",
+        };
 
-        let use_mut = if self.op.use_mut() { "&mut " } else { "" };
+        let first_arg = match self.op.use_vec_id() {
+            true => format!("{}{}, ", ref_mut, vec_id),
+            false => "".to_string(),
+        };
 
         let mut args = String::new();
         for arg in &self.args {
@@ -457,9 +477,11 @@ impl CodeGenerator for VectorOperation {
             args.push_str(", ");
         }
 
+        let typ = self.elem_typ.inline();
+
         vec![format!(
-            "{}vector::{}({}{}, {})",
-            ret_id, call, use_mut, vec_id, args
+            "{}vector::{}<{}>({}{})",
+            ret_id, call, typ, first_arg, args
         )]
     }
 }

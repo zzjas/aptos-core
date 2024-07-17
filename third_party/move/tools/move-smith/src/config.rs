@@ -30,7 +30,11 @@ pub struct Config {
     /// type of another struct
     pub max_num_fields_of_struct_type: usize,
 
+    // Includes all kinds of statements
     pub max_num_stmts_in_func: usize,
+    // Addtionally insert some resource or vector operations
+    pub max_num_additional_operations_in_func: usize,
+
     pub max_num_params_in_func: usize,
 
     // This has lowest priority
@@ -114,6 +118,7 @@ impl Default for Config {
             max_num_fields_of_struct_type: 3,
 
             max_num_stmts_in_func: 5,
+            max_num_additional_operations_in_func: 5,
             max_num_params_in_func: 7,
 
             max_num_stmts_in_block: 5,

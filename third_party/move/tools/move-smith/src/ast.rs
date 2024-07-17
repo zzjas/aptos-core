@@ -30,10 +30,17 @@ pub struct CompileUnit {
 pub struct Module {
     // pub attributes: Vec<Attributes>,
     // pub address: Option<LeadingNameAccess>,
+    pub uses: Vec<Use>,
     pub name: Identifier,
     pub functions: Vec<RefCell<Function>>,
     pub structs: Vec<RefCell<StructDefinition>>,
     pub constants: Vec<Constant>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Use {
+    pub address: String,
+    pub module: Identifier,
 }
 
 /// A simplified Move Script.
@@ -243,9 +250,19 @@ pub enum VectorOperationKind {
 }
 
 impl VectorOperationKind {
+    pub fn use_vec_id(&self) -> bool {
+        use VectorOperationKind::*;
+        !matches!(self, Empty)
+    }
+
     pub fn has_return(&self) -> bool {
         use VectorOperationKind::*;
         matches!(self, IsEmpty)
+    }
+
+    pub fn use_ref(&self) -> bool {
+        use VectorOperationKind::*;
+        matches!(self, IsEmpty | Rotate)
     }
 
     pub fn use_mut(&self) -> bool {
@@ -264,12 +281,8 @@ impl VectorOperationKind {
 
     /// Return the list of argument types required for the Self operation
     /// Does not include the vector reference itself
-    pub fn args_types(&self) -> Vec<Type> {
+    pub fn args_types(&self, _elem_typ: &Type) -> Vec<Type> {
         use VectorOperationKind::*;
-        if !self.has_return() {
-            return vec![];
-        }
-
         match self {
             Empty => vec![],
             IsEmpty => vec![],
@@ -476,6 +489,16 @@ impl<'a> ExprCollector<'a> {
                 }
                 if let Some(addr) = &rop.addr {
                     self.visit_expr(addr);
+                }
+            },
+            Expression::VectorOperation(vop) => {
+                for arg in &vop.args {
+                    self.visit_expr(arg);
+                }
+            },
+            Expression::VectorLiteral(_, VectorLiteral::Multiple(_, exprs)) => {
+                for expr in exprs {
+                    self.visit_expr(expr);
                 }
             },
             _ => (),

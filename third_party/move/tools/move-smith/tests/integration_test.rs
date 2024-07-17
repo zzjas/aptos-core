@@ -16,6 +16,7 @@ use std::{cell::RefCell, collections::BTreeSet};
 
 fn simple_module() -> Module {
     Module {
+        uses: Vec::new(),
         name: Identifier::new_str("SimpleModule", IDKind::Module),
         functions: vec![RefCell::new(Function {
             signature: FunctionSignature {
