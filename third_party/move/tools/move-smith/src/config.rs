@@ -87,6 +87,7 @@ impl Default for Config {
                 "could create dangling a reference".to_string(),
                 "referential transparency violated".to_string(),
                 "EXTRANEOUS_ACQUIRES_ANNOTATION".to_string(),
+                "invalid transfer of references".to_string(),
             ],
 
             experiment_combos: vec![
