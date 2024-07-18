@@ -1091,7 +1091,10 @@ impl MoveSmith {
         use VectorOperationKind::*;
 
         let op = self.random_vector_operation_kind(u)?;
-        let vec_ids = self.env().get_vector_identifiers(parent_scope);
+        trace!("Generating vector operation: {:?}", op);
+
+        let vec_ids = self.env().get_vector_identifiers(None, parent_scope);
+        trace!("Available vector identifiers: {:?}", vec_ids);
 
         // Create vectors first, 3 is arbitrarily chosen
         let num_vecs_needed = match op {
@@ -1127,6 +1130,7 @@ impl MoveSmith {
                 (vec_id, elem_typ)
             },
         };
+
         let var_acc = E::Variable(VariableAccess {
             name: vec_id.clone(),
             copy: false,
@@ -1138,6 +1142,26 @@ impl MoveSmith {
             VecOpVecType::Ref => vec![E::Reference(Box::new(var_acc))],
             VecOpVecType::MutRef => vec![E::MutReference(Box::new(var_acc))],
         };
+
+        if matches!(op, Append) {
+            let mut other_vec_ids = self.env().get_vector_identifiers(
+                Some(&Type::Vector(Box::new(elem_typ.clone()))),
+                parent_scope,
+            );
+            other_vec_ids.retain(|id| id != &vec_id);
+            if other_vec_ids.is_empty() {
+                trace!(
+                    "Cannot find another vector to append to, defaulting to generating a new vector"
+                );
+                return self.generate_new_vector_literal(u, parent_scope);
+            } else {
+                let other_vec_id = u.choose(&other_vec_ids)?.clone();
+                args.push(E::Variable(VariableAccess {
+                    name: other_vec_id,
+                    copy: false,
+                }));
+            }
+        }
 
         for arg_type in op.args_types(&elem_typ) {
             // Do not generate too large expressions for vector operation arguments
@@ -1806,7 +1830,11 @@ impl MoveSmith {
 
         // Now we have collected all candidate expressions that do not require recursion
         // We can perform the expr_depth check here
-        assert!(!default_choices.is_empty());
+        assert!(
+            !default_choices.is_empty(),
+            "No default choices for type: {:?}",
+            typ
+        );
         if self.env().reached_expr_depth_limit() {
             warn!("Max expr depth reached while gen expr of type: {:?}", typ);
             return Ok(u.choose(&default_choices)?.clone());

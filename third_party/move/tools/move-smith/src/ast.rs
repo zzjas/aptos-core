@@ -314,7 +314,9 @@ impl VectorOperationKind {
             DestroyEmpty => vec![],
             Swap => vec![Type::U64, Type::U64],
             Reverse => vec![],
-            Append => vec![Type::Vector(Box::new(elem_typ.clone()))],
+            // Append requires another vector so we need to handle it specially
+            // during generaton to avoid get a random vector that doesn't type check
+            Append => vec![],
             IsEmpty => vec![],
             Contains => vec![Type::Ref(Box::new(elem_typ.clone()))],
             IndexOf => vec![Type::Ref(Box::new(elem_typ.clone()))],

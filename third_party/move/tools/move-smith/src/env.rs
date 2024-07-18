@@ -151,8 +151,8 @@ impl Env {
         ids
     }
 
-    pub fn get_vector_identifiers(&self, scope: &Scope) -> Vec<Identifier> {
-        let mut ids = self.get_identifiers_all(None, Some(IDKind::Var), Some(scope));
+    pub fn get_vector_identifiers(&self, typ: Option<&Type>, scope: &Scope) -> Vec<Identifier> {
+        let mut ids = self.get_identifiers_all(typ, Some(IDKind::Var), Some(scope));
         ids.retain(|id| matches!(self.type_pool.get_type(id), Some(Type::Vector(_))));
         ids
     }
