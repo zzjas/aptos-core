@@ -10929,8 +10929,10 @@ dependencies = [
  "move-transactional-test-runner",
  "num-bigint 0.3.3",
  "rand 0.7.3",
+ "serde",
  "tempfile",
  "tokio",
+ "toml 0.7.8",
 ]
 
 [[package]]

@@ -4,18 +4,43 @@
 //! Configuration for the MoveSmith fuzzer.
 
 use move_compiler_v2::Experiment;
+use serde::Deserialize;
+use std::{collections::BTreeMap, path::Path};
 
 /// The configuration for the MoveSmith fuzzer.
-/// MoveSmith will randomly pick within [0..max_num_XXX] during generation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Config {
-    // The list of known errors to ignore
-    // This is aggresive: if the diff contains any of these strings,
-    // the report will be ignored
-    pub known_error: Vec<String>,
+    pub fuzz: FuzzConfig,
+    pub generation: GenerationConfig,
+}
 
-    pub experiment_combos: Vec<(String, Vec<(String, bool)>)>,
+#[derive(Debug, Clone, Deserialize)]
+pub struct FuzzConfig {
+    /// The list of errors to suppress due to imprecision in the generation process
+    pub ignore_errors: Vec<String>,
+    /// The list of known errors to ignore
+    /// This is aggresive: if the diff contains any of these strings,
+    /// the report will be ignored
+    pub known_errors: Vec<String>,
+    /// List of possible compiler settings to use
+    pub compiler_settings: BTreeMap<String, CompilerSetting>,
+    /// The list of compiler settings to run in current fuzzing session
+    pub runs: Vec<String>,
+    // Transactional test timeout
+    pub transactional_timeout_sec: usize,
+}
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct CompilerSetting {
+    /// The list of experiments to enable
+    pub enable: Vec<String>,
+    /// The list of experiments to disable
+    pub disable: Vec<String>,
+}
+
+/// MoveSmith will randomly pick within [0..max_num_XXX] during generation.
+#[derive(Debug, Clone, Deserialize)]
+pub struct GenerationConfig {
     /// The number of `//# run 0xCAFE::ModuleX::funX` to invoke
     pub num_runs_per_func: usize,
     /// The number of functions that can have `inline`
@@ -56,7 +81,6 @@ pub struct Config {
 
     // Timeout in seconds
     pub generation_timeout_sec: usize, // MoveSmith generation timeout
-    pub transactional_timeout_sec: usize, // Transactional test timeout
 
     // Allow recursive calls in the generated code
     pub allow_recursive_calls: bool,
@@ -68,46 +92,15 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            known_error: vec![
-                "exceeded maximal local count".to_string(),
-                "MOVELOC_UNAVAILABLE_ERROR".to_string(),
-                "unassigned variable".to_string(),
-                "unbound type".to_string(),
-                "incompatible types".to_string(),
-                "recursion during function inlining".to_string(),
-                "still mutably borrowed".to_string(),
-                "MOVELOC_EXISTS_BORROW_ERROR".to_string(),
-                "STLOC_UNSAFE_TO_DESTROY_ERROR".to_string(),
-                "mutable ownership violated".to_string(),
-                "ambiguous usage of variable".to_string(),
-                "cannot assign to borrowed local".to_string(),
-                "requires exclusive access but is borrowed".to_string(),
-                "cannot implicitly freeze local".to_string(),
-                "same mutable reference in value is also used".to_string(),
-                "could create dangling a reference".to_string(),
-                "referential transparency violated".to_string(),
-                "EXTRANEOUS_ACQUIRES_ANNOTATION".to_string(),
-                "invalid transfer of references".to_string(),
-            ],
+            fuzz: FuzzConfig::default(),
+            generation: GenerationConfig::default(),
+        }
+    }
+}
 
-            experiment_combos: vec![
-                // TODO: comment out for now for performance
-                // TODO: should read configs from a file or command line arguments
-                ("optimize".to_string(), vec![(
-                    Experiment::OPTIMIZE.to_string(),
-                    true,
-                )]),
-                // ("no-optimize".to_string(), vec![
-                //     (Experiment::OPTIMIZE.to_string(), false),
-                //     (Experiment::ACQUIRES_CHECK.to_string(), false),
-                // ]),
-                // ("optimize-no-simplify".to_string(), vec![
-                //     (Experiment::OPTIMIZE.to_string(), true),
-                //     (Experiment::AST_SIMPLIFY.to_string(), false),
-                //     (Experiment::ACQUIRES_CHECK.to_string(), false),
-                // ]),
-            ],
-
+impl Default for GenerationConfig {
+    fn default() -> Self {
+        Self {
             num_runs_per_func: 3,
             max_num_inline_funcs: 1,
 
@@ -132,11 +125,103 @@ impl Default for Config {
             max_num_type_params_in_struct: 2,
 
             generation_timeout_sec: 5,
-            transactional_timeout_sec: 10,
 
             allow_recursive_calls: false,
 
             max_hex_byte_str_size: 32,
         }
+    }
+}
+
+impl Default for FuzzConfig {
+    fn default() -> Self {
+        let mut config = Self {
+            ignore_errors: vec![
+                "exceeded maximal local count".to_string(),
+                "unassigned variable".to_string(),
+                "unbound type".to_string(),
+                "incompatible types".to_string(),
+                "recursion during function inlining".to_string(),
+                "still mutably borrowed".to_string(),
+                "mutable ownership violated".to_string(),
+                "ambiguous usage of variable".to_string(),
+                "cannot assign to borrowed local".to_string(),
+                "requires exclusive access but is borrowed".to_string(),
+                "cannot implicitly freeze local".to_string(),
+                "same mutable reference in value is also used".to_string(),
+                "could create dangling a reference".to_string(),
+                "referential transparency violated".to_string(),
+                "invalid transfer of references".to_string(),
+            ],
+            known_errors: vec![
+                "MOVELOC_UNAVAILABLE_ERROR".to_string(),
+                "MOVELOC_EXISTS_BORROW_ERROR".to_string(),
+                "STLOC_UNSAFE_TO_DESTROY_ERROR".to_string(),
+                "EXTRANEOUS_ACQUIRES_ANNOTATION".to_string(),
+            ],
+            compiler_settings: BTreeMap::new(),
+            runs: vec!["opt".to_string()],
+            transactional_timeout_sec: 10,
+        };
+        config
+            .compiler_settings
+            .insert("opt".to_string(), CompilerSetting {
+                enable: vec![Experiment::OPTIMIZE.to_string()],
+                disable: vec![],
+            });
+        config
+            .compiler_settings
+            .insert("no-opt".to_string(), CompilerSetting {
+                enable: vec![],
+                disable: vec![Experiment::OPTIMIZE.to_string()],
+            });
+        config
+            .compiler_settings
+            .insert("opt-no-simp".to_string(), CompilerSetting {
+                enable: vec![Experiment::OPTIMIZE.to_string()],
+                disable: vec![
+                    Experiment::AST_SIMPLIFY.to_string(),
+                    Experiment::ACQUIRES_CHECK.to_string(),
+                ],
+            });
+        config
+    }
+}
+
+impl Config {
+    pub fn from_toml_file(file_path: &Path) -> Self {
+        let config_str = std::fs::read_to_string(file_path).expect("Cannot read from config file");
+        let config: Config = toml::from_str(&config_str).expect("Cannot parse config file");
+        config
+    }
+
+    pub fn all_errors(&self) -> Vec<String> {
+        let mut errors = self.fuzz.ignore_errors.clone();
+        errors.extend(self.fuzz.known_errors.clone());
+        errors
+    }
+
+    /// Returns (Name, Compiler Configurations) for each run
+    pub fn runs(&self) -> Vec<(String, CompilerSetting)> {
+        let mut runs = vec![];
+        for r in self.fuzz.runs.iter() {
+            if let Some(setting) = self.fuzz.compiler_settings.get(r) {
+                runs.push((r.clone(), setting.clone()));
+            }
+        }
+        runs
+    }
+}
+
+impl CompilerSetting {
+    pub fn to_expriments(&self) -> Vec<(String, bool)> {
+        let mut exp = vec![];
+        for e in self.enable.iter() {
+            exp.push((e.clone(), true));
+        }
+        for e in self.disable.iter() {
+            exp.push((e.clone(), false));
+        }
+        exp
     }
 }

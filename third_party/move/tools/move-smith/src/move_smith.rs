@@ -39,8 +39,6 @@ use std::{
 
 /// Keeps track of the generation state.
 pub struct MoveSmith {
-    pub config: RefCell<Config>,
-
     // The output code
     modules: Vec<RefCell<Module>>,
     script: Option<Script>,
@@ -62,7 +60,6 @@ impl MoveSmith {
     pub fn new(config: Config) -> Self {
         let env = Env::new(&config);
         Self {
-            config: RefCell::new(config),
             modules: Vec::new(),
             script: None,
             runs: RefCell::new(Vec::new()),
@@ -101,7 +98,7 @@ impl MoveSmith {
     ///
     /// Script is generated after all modules are generated so that the script can call functions.
     pub fn generate(&mut self, u: &mut Unstructured) -> Result<()> {
-        let num_modules = u.int_in_range(1..=self.config.borrow().max_num_modules)?;
+        let num_modules = u.int_in_range(1..=self.env().config.max_num_modules)?;
 
         for _ in 0..num_modules {
             self.modules
@@ -271,8 +268,8 @@ impl MoveSmith {
                 all_funcs.push(f.clone());
             }
         }
-
-        for _ in 0..u.int_in_range(1..=self.config.borrow().max_num_calls_in_script)? {
+        let num_calls = u.int_in_range(1..=self.env().config.max_num_calls_in_script)?;
+        for _ in 0..num_calls {
             let func = u.choose(&all_funcs)?;
             let mut call = self.generate_call_to_function(
                 u,
@@ -295,7 +292,8 @@ impl MoveSmith {
 
         // Struct names
         let mut structs = Vec::new();
-        for _ in 0..u.int_in_range(1..=self.config.borrow().max_num_structs_in_module)? {
+        let num_structs = u.int_in_range(1..=self.env().config.max_num_structs_in_module)?;
+        for _ in 0..num_structs {
             structs.push(RefCell::new(self.generate_struct_skeleton(u, &scope)?));
         }
 
@@ -316,7 +314,8 @@ impl MoveSmith {
 
         // Function signatures
         let mut functions = Vec::new();
-        for _ in 0..u.int_in_range(1..=self.config.borrow().max_num_functions_in_module)? {
+        let num_funcs = u.int_in_range(1..=self.env().config.max_num_functions_in_module)?;
+        for _ in 0..num_funcs {
             functions.push(RefCell::new(self.generate_function_skeleton(u, &scope)?));
         }
         info!("Done generating function skeletons");
@@ -394,9 +393,9 @@ impl MoveSmith {
         callee: &RefCell<Function>,
     ) -> Result<Vec<Function>> {
         let signature = callee.borrow().signature.clone();
-
         let mut runners = Vec::new();
-        for i in 0..self.config.borrow().num_runs_per_func {
+        let num_runs = u.int_in_range(1..=self.env().config.num_runs_per_func)?;
+        for i in 0..num_runs {
             let sref_dec = Statement::Decl(Declaration {
                 names: vec![self.env().type_pool.get_signer_ref_var()],
                 typs: vec![Type::Ref(Box::new(Type::Signer))],
@@ -473,7 +472,8 @@ impl MoveSmith {
         // Generate type parameters for the struct
         // NOTE: All parameters will have copy+drop for now to avoid having no expression to generate
         let mut type_parameters = Vec::new();
-        for _ in 0..u.int_in_range(0..=self.config.borrow().max_num_type_params_in_struct)? {
+        let num_tps = u.int_in_range(0..=self.env().config.max_num_type_params_in_struct)?;
+        for _ in 0..num_tps {
             type_parameters.push(self.generate_type_parameter(
                 u,
                 &struct_scope,
@@ -513,7 +513,8 @@ impl MoveSmith {
         parent_scope: &Scope,
     ) -> Result<()> {
         let struct_scope = self.env().id_pool.get_scope_for_children(&st.borrow().name);
-        for _ in 0..u.int_in_range(0..=self.config.borrow().max_num_fields_in_struct)? {
+        let num_fields = u.int_in_range(0..=self.env().config.max_num_fields_in_struct)?;
+        for _ in 0..num_fields {
             let (name, _) = self.get_next_identifier(IDKinds::Var, &struct_scope);
 
             let typ = loop {
@@ -760,7 +761,8 @@ impl MoveSmith {
     ) -> Result<FunctionSignature> {
         // First generate type parameters so that they can be used in the parameters and return type
         let mut type_parameters = Vec::new();
-        for _ in 0..u.int_in_range(0..=self.config.borrow().max_num_type_params_in_func)? {
+        let num_tps = u.int_in_range(0..=self.env().config.max_num_type_params_in_func)?;
+        for _ in 0..num_tps {
             type_parameters.push(self.generate_type_parameter(
                 u,
                 parent_scope,
@@ -772,7 +774,7 @@ impl MoveSmith {
             )?);
         }
 
-        let num_params = u.int_in_range(0..=self.config.borrow().max_num_params_in_func)?;
+        let num_params = u.int_in_range(0..=self.env().config.max_num_params_in_func)?;
         let mut parameters = vec![(
             self.env().type_pool.get_signer_ref_var(),
             Type::Ref(Box::new(Type::Signer)),
@@ -895,8 +897,8 @@ impl MoveSmith {
             warn!("Max expr depth will be reached in this block, skipping generating body");
             Vec::new()
         } else {
-            let num_stmts = num_stmts
-                .unwrap_or(u.int_in_range(0..=self.config.borrow().max_num_stmts_in_block)?);
+            let num_stmts =
+                num_stmts.unwrap_or(u.int_in_range(0..=self.env().config.max_num_stmts_in_block)?);
             self.generate_statements(u, &block_scope, num_stmts)?
         };
         let return_expr = match ret_typ {
@@ -1033,7 +1035,8 @@ impl MoveSmith {
             },
             2 => {
                 let mut s = String::new();
-                for _ in 0..u.int_in_range(1..=self.env().config.max_hex_byte_str_size)? {
+                let num_bytes = u.int_in_range(1..=self.env().config.max_hex_byte_str_size)?;
+                for _ in 0..num_bytes {
                     if u.int_in_range(0..=10)? > 8 {
                         // Choose an escape character
                         let idx = u.int_in_range(0..=6)?;
@@ -1066,7 +1069,8 @@ impl MoveSmith {
             },
             3 => {
                 let mut hex = String::new();
-                for _ in 0..u.int_in_range(1..=self.env().config.max_hex_byte_str_size)? {
+                let num_bytes = u.int_in_range(1..=self.env().config.max_hex_byte_str_size)?;
+                for _ in 0..num_bytes {
                     hex.push_str(&format!("{:02x}", u8::arbitrary(u)?));
                 }
                 VectorLiteral::HexString(hex)
@@ -2683,7 +2687,7 @@ impl MoveSmith {
                     // Only allow function with smaller name to call function with larger name
                     // While recursive calls are interesting, they waste fuzzing time
                     // e.g function0 can call function1, but function1 cannot call function0
-                    if !self.config.borrow().allow_recursive_calls {
+                    if !self.env().config.allow_recursive_calls {
                         let callee_num = self.get_function_num(&sig.name.to_string());
                         if caller_num >= callee_num {
                             continue;

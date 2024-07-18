@@ -5,7 +5,7 @@
 
 use arbitrary::Unstructured;
 use clap::Parser;
-use move_smith::{utils::run_transactional_test, CodeGenerator, MoveSmith};
+use move_smith::{config::Config, utils::run_transactional_test, CodeGenerator, MoveSmith};
 use std::{fs, path::PathBuf};
 
 #[derive(Debug, Parser)]
@@ -32,7 +32,7 @@ fn main() {
     let code = smith.get_compile_unit().emit_code();
     println!("Loaded code from file: {:?}", args.input_file);
 
-    let result = run_transactional_test(code, &smith.config.take());
+    let result = run_transactional_test(code, &Config::default());
     if result.is_err() {
         println!("check_artifact failed");
         println!("{}", result);

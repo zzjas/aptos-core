@@ -240,7 +240,7 @@ pub fn compile_move_code(code: String, v1: bool, v2: bool) -> bool {
 pub fn run_transactional_test(code: String, config: &Config) -> TransactionalResult {
     // Create a tokio runtime
     let rt = Runtime::new().unwrap();
-    let timeout_duration = Duration::new(config.transactional_timeout_sec as u64, 0); // 10 seconds
+    let timeout_duration = Duration::new(config.fuzz.transactional_timeout_sec as u64, 0); // 10 seconds
 
     let config_clone = config.clone();
     let result = rt.block_on(async {
@@ -264,10 +264,11 @@ pub async fn run_transactional_test_no_timeout(
 ) -> TransactionalResult {
     let (file_path, dir) = create_tmp_move_file(code, None);
 
-    let ignores = config.known_error.clone();
+    let ignores = config.all_errors();
 
-    for (name, experiments) in config.experiment_combos.iter() {
-        let result = run_transactional_test_with_experiments(&file_path, experiments);
+    for (name, setting) in config.runs().iter() {
+        let experiments = setting.to_expriments();
+        let result = run_transactional_test_with_experiments(&file_path, &experiments);
 
         let processed_result = process_transactional_test_result(name, &ignores, result);
         match &processed_result {

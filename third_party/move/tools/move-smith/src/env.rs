@@ -4,7 +4,7 @@
 //! Manages the various information during generation
 
 use crate::{
-    config::Config,
+    config::{Config, GenerationConfig},
     names::{Identifier, IdentifierKind as IDKind, IdentifierPool, Scope},
     types::{Type, TypePool},
 };
@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, BTreeSet};
 /// The meta store for all the information during generation
 #[derive(Debug)]
 pub struct Env {
-    pub config: Config,
+    pub config: GenerationConfig,
     pub id_pool: IdentifierPool,
     pub type_pool: TypePool,
 
@@ -108,6 +108,7 @@ impl LiveVarPool {
 impl Env {
     /// Create a new environment with the given configuration
     pub fn new(config: &Config) -> Self {
+        let config = &config.generation;
         Self {
             config: config.clone(),
             id_pool: IdentifierPool::new(),
