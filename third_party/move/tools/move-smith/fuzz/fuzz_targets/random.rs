@@ -5,8 +5,19 @@
 
 use arbitrary::Unstructured;
 use libfuzzer_sys::fuzz_target;
-use move_smith::{config::Config, utils::run_transactional_test, CodeGenerator, MoveSmith};
+use move_smith::{config::Config, runner::Runner, CodeGenerator, MoveSmith};
+use once_cell::sync::Lazy;
 use rand::{rngs::StdRng, Rng, SeedableRng};
+use std::{env, path::PathBuf};
+
+static CONFIG: Lazy<Config> = Lazy::new(|| {
+    let config_path =
+        env::var("MOVE_SMITH_CONFIG").unwrap_or_else(|_| "MoveSmith.toml".to_string());
+    let config_path = PathBuf::from(config_path);
+    Config::from_toml_file(&config_path)
+});
+
+static RUNNER: Lazy<Runner> = Lazy::new(|| Runner::new_with_known_errors(&CONFIG, false));
 
 const INITIAL_BUFFER_SIZE: usize = 1024 * 4;
 const MAX_BUFFER_SIZE: usize = 1024 * 1024;
@@ -31,7 +42,7 @@ fuzz_target!(|data: &[u8]| {
             buffer.extend(new_buffer);
         }
 
-        let mut smith = MoveSmith::default();
+        let mut smith = MoveSmith::new(&CONFIG);
         let u = &mut Unstructured::new(&buffer);
         match smith.generate(u) {
             Ok(()) => break smith.get_compile_unit().emit_code(),
@@ -47,5 +58,5 @@ fuzz_target!(|data: &[u8]| {
         buffer_size *= 2;
     };
 
-    run_transactional_test(code, &Config::default()).unwrap();
+    RUNNER.run_transactional_test_unwrap(&code);
 });

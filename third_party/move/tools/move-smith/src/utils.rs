@@ -3,23 +3,19 @@
 
 //! Utility functions for MoveSmith.
 
-use crate::{ast::CompileUnit, config::Config, move_smith::MoveSmith};
+use crate::{ast::CompileUnit, move_smith::MoveSmith};
 use arbitrary::{Result, Unstructured};
 use log::{error, info};
 use move_model::metadata::{CompilerVersion, LanguageVersion};
 use move_package::BuildConfig;
-use move_transactional_test_runner::{vm_test_harness, vm_test_harness::TestRunConfig};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::{
-    error::Error,
-    fmt, fs,
+    fs,
     fs::File,
     io::{stderr, Write},
     path::{Path, PathBuf},
-    time::Duration,
 };
 use tempfile::{tempdir, TempDir};
-use tokio::runtime::Runtime;
 
 const MOVE_TOML_TEMPLATE: &str = r#"[package]
 name = "test"
@@ -28,56 +24,6 @@ version = "0.0.0"
 [dependencies]
 AptosFramework = { local = "$PATH" }
 "#;
-
-/// The result of running a transactional test.
-pub enum TransactionalResult {
-    // The test framework did not report error
-    Ok,
-    // Takes too long to execute the transactional test
-    Timeout,
-    // The test framework reported warnings only
-    WarningsOnly,
-    // The test framework reported an error, but it is in the ignore list
-    IgnoredErr(String),
-    // The test framework reported an error
-    Err(String),
-}
-
-impl TransactionalResult {
-    pub fn unwrap(&self) {
-        match self {
-            TransactionalResult::Ok => {},
-            TransactionalResult::Timeout => {},
-            TransactionalResult::WarningsOnly => {},
-            TransactionalResult::IgnoredErr(msg) => {
-                info!("Ignored error: {}", msg);
-            },
-            TransactionalResult::Err(msg) => {
-                panic!("Unwrapping transactional test error: {}", msg);
-            },
-        }
-    }
-
-    pub fn is_err(&self) -> bool {
-        matches!(self, TransactionalResult::Err(_))
-    }
-}
-
-impl fmt::Display for TransactionalResult {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            TransactionalResult::Ok => write!(f, "Transactional test passed"),
-            TransactionalResult::Timeout => write!(f, "Transactional test timed out"),
-            TransactionalResult::WarningsOnly => {
-                write!(f, "Transactional test passed with only warnings")
-            },
-            TransactionalResult::IgnoredErr(msg) => {
-                write!(f, "Transactional test passed with errors ignored: {}", msg)
-            },
-            TransactionalResult::Err(msg) => write!(f, "Transactional test failed: {}", msg),
-        }
-    }
-}
 
 pub fn choose_item_weighted<T>(u: &mut Unstructured, item_weights: &[(T, u32)]) -> Result<T>
 where
@@ -134,19 +80,23 @@ pub fn raw_to_compile_unit(data: &[u8]) -> Result<CompileUnit> {
 
 /// Create a temporary Move file with the given code.
 // TODO: if on Linux, we can create in-memory file to reduce I/O
-fn create_tmp_move_file(code: String, name_hint: Option<&str>) -> (PathBuf, TempDir) {
+pub fn create_tmp_move_file(code: &str, name_hint: Option<&str>) -> (PathBuf, TempDir) {
     let dir: TempDir = tempdir().unwrap();
     let name = name_hint.unwrap_or("temp.move");
     let file_path = dir.path().join(name);
     {
         let mut file = File::create(&file_path).unwrap();
-        writeln!(file, "{}", code.as_str()).unwrap();
+        writeln!(file, "{}", code).unwrap();
     }
     (file_path, dir)
 }
 
-fn get_aptos_framework_path() -> String {
-    let crate_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+pub fn get_move_smith_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+}
+
+pub fn get_aptos_framework_path() -> String {
+    let crate_dir = get_move_smith_path();
     let relative_path =
         crate_dir.join("../../../../../aptos-core/aptos-move/framework/aptos-framework/");
     let absolute_path = relative_path.canonicalize().unwrap();
@@ -170,7 +120,6 @@ pub fn create_move_package(code: String, output_dir: &Path) {
 /// Create the build configuration for compiler V1
 pub fn create_compiler_config_v1() -> BuildConfig {
     let mut config = BuildConfig::default();
-    // config.force_recompilation = true;
     config.compiler_config.compiler_version = Some(CompilerVersion::V1);
     config
 }
@@ -178,7 +127,6 @@ pub fn create_compiler_config_v1() -> BuildConfig {
 /// Create the build configuration for compiler V2
 pub fn create_compiler_config_v2() -> BuildConfig {
     let mut config = BuildConfig::default();
-    // config.force_recompilation = true;
     config.compiler_config.compiler_version = Some(CompilerVersion::V2_0);
     config.compiler_config.language_version = Some(LanguageVersion::V2_0);
     config
@@ -236,87 +184,6 @@ pub fn compile_move_code(code: String, v1: bool, v2: bool) -> bool {
     v1_result == v2_result
 }
 
-/// Runs the given Move code as a transactional test.
-pub fn run_transactional_test(code: String, config: &Config) -> TransactionalResult {
-    // Create a tokio runtime
-    let rt = Runtime::new().unwrap();
-    let timeout_duration = Duration::new(config.fuzz.transactional_timeout_sec as u64, 0); // 10 seconds
-
-    let config_clone = config.clone();
-    let result = rt.block_on(async {
-        let handle = tokio::spawn(run_transactional_test_no_timeout(code, config_clone));
-        tokio::select! {
-            res = handle => match res {
-                Ok(res) => res,
-                Err(e) => TransactionalResult::Err(format!("Error running transactional test: {:?}", e)),
-            },
-            _ = tokio::time::sleep(timeout_duration) => TransactionalResult::Timeout,
-        }
-    });
-
-    rt.shutdown_background();
-    result
-}
-
-pub async fn run_transactional_test_no_timeout(
-    code: String,
-    config: Config,
-) -> TransactionalResult {
-    let (file_path, dir) = create_tmp_move_file(code, None);
-
-    let ignores = config.all_errors();
-
-    for (name, setting) in config.runs().iter() {
-        let experiments = setting.to_expriments();
-        let result = run_transactional_test_with_experiments(&file_path, &experiments);
-
-        let processed_result = process_transactional_test_result(name, &ignores, result);
-        match &processed_result {
-            TransactionalResult::Ok => {},
-            _ => return processed_result,
-        };
-    }
-
-    dir.close().unwrap();
-    TransactionalResult::Ok
-}
-
-fn run_transactional_test_with_experiments(
-    file_path: &Path,
-    experiments: &[(String, bool)],
-) -> Result<(), Box<dyn Error>> {
-    let vm_test_config = TestRunConfig::ComparisonV1V2 {
-        language_version: LanguageVersion::V2_0,
-        v2_experiments: experiments.to_owned(),
-    };
-
-    vm_test_harness::run_test_with_config_and_exp_suffix(vm_test_config, file_path, &None)
-}
-
-/// Filtering the error messages from the transactional test.
-/// Currently only treat `error[Exxxx]` as a real error to ignore warnings.
-fn process_transactional_test_result(
-    name: &String,
-    ignores: &[String],
-    result: Result<(), Box<dyn Error>>,
-) -> TransactionalResult {
-    if result.is_ok() {
-        return TransactionalResult::Ok;
-    }
-    let err = result.unwrap_err();
-    let msg = format!("{}", err);
-    for ignore in ignores.iter() {
-        if msg.contains(ignore) {
-            return TransactionalResult::IgnoredErr(msg);
-        }
-    }
-    if msg.contains("error[E") || msg.contains("error:") || msg.contains("bug") {
-        // Raise an error with the name of the experiment
-        TransactionalResult::Err(format!("error with experiment: {:?}, {}", name, err))
-    } else {
-        TransactionalResult::WarningsOnly
-    }
-}
 #[cfg(test)]
 mod tests {
     use super::*;

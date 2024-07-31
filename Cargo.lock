@@ -9251,6 +9251,7 @@ dependencies = [
  "console",
  "lazy_static",
  "number_prefix 0.3.0",
+ "rayon",
  "regex",
 ]
 
@@ -10919,16 +10920,23 @@ dependencies = [
 name = "move-smith"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "arbitrary",
  "clap 4.4.14",
+ "derive_builder",
  "env_logger",
+ "glob",
+ "indicatif 0.15.0",
  "log",
  "move-compiler-v2",
  "move-model",
  "move-package",
  "move-transactional-test-runner",
  "num-bigint 0.3.3",
+ "once_cell",
  "rand 0.7.3",
+ "rayon",
+ "regex",
  "serde",
  "tempfile",
  "tokio",

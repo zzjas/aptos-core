@@ -86,7 +86,6 @@ def sort_directories_by_date(fpaths):
 
 
 def make_plot(results, names, component: str):
-    pass
     plt.figure(figsize=(12, 11))
     plt.xlabel("Runs")
     plt.ylabel("Percentage")

@@ -4,11 +4,13 @@
 //! MoveSmith is a fuzzer at the Move language level.
 
 pub mod ast;
+pub mod cli;
 pub mod codegen;
 pub mod config;
 pub mod env;
 pub mod move_smith;
 pub mod names;
+pub mod runner;
 pub mod types;
 pub mod utils;
 

@@ -51,14 +51,14 @@ pub struct MoveSmith {
 impl Default for MoveSmith {
     /// Create a new MoveSmith instance with default configuration.
     fn default() -> Self {
-        Self::new(Config::default())
+        Self::new(&Config::default())
     }
 }
 
 impl MoveSmith {
     /// Create a new MoveSmith instance with the given configuration.
-    pub fn new(config: Config) -> Self {
-        let env = Env::new(&config);
+    pub fn new(config: &Config) -> Self {
+        let env = Env::new(config);
         Self {
             modules: Vec::new(),
             script: None,
@@ -1433,8 +1433,8 @@ impl MoveSmith {
             3,                // BinaryOperation
             5,                // If-Else
             1,                // Block
-            func_call_weight, // FunctionCall
-            assign_weight,    // Assignment
+            func_call_weight, // FunctionCall --> 0 or 10
+            assign_weight,    // Assignment   --> 0 or 5
         ];
 
         let idx = choose_idx_weighted(u, &weights)?;
@@ -2009,9 +2009,22 @@ impl MoveSmith {
         typ: Option<Type>,
     ) -> Result<IfExpr> {
         trace!("Generating if expression of type: {:?}", typ);
+        let typ = match &typ {
+            Some(t) => match self.is_type_concretizable(t, parent_scope) {
+                true => Some(
+                    self.concretize_type(u, t, parent_scope, vec![], None)
+                        .unwrap(),
+                ),
+                false => Some(t.clone()),
+            },
+            None => None,
+        };
+        trace!("Generating if expression with concretized type: {:?}", typ);
+
         trace!("Generating condition for if expression");
         let condition =
             self.generate_expression_of_type(u, parent_scope, &Type::Bool, true, true)?;
+
         trace!("Generating block for if true branch");
         let body = self.generate_block(u, parent_scope, None, typ.clone())?;
 

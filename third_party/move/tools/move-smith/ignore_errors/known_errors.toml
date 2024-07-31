@@ -1,0 +1,47 @@
+[[errors]]
+v1_errors = []
+v2_errors = ["bug: bytecode verification failed with unexpected status code `EQUALITY_OP_TYPE_MISMATCH_ERROR`. This is a compiler bug, consider reporting it."]
+
+[[errors]]
+v1_errors = []
+v2_errors = ["bug: bytecode verification failed with unexpected status code `STLOC_UNSAFE_TO_DESTROY_ERROR`. This is a compiler bug, consider reporting it."]
+
+[[errors]]
+v1_errors = []
+v2_errors = ["error: cannot copy variable which is still mutably borrowed"]
+
+[[errors]]
+v1_errors = []
+v2_errors = ["error: cannot mutably borrow since immutable references exist"]
+
+[[errors]]
+v1_errors = []
+v2_errors = ["error: cyclic type instantiation: a cycle of recursive calls causes a type to grow without bound"]
+
+[[errors]]
+v1_errors = []
+v2_errors = ["error: mutable reference in variable requires exclusive access but is borrowed", "error: same mutable reference in value is also used in other value in argument list"]
+
+[[errors]]
+v1_errors = ["Error: error[E06002]: use of unassigned variable"]
+v2_errors = ["bug: bytecode verification failed with unexpected status code `MOVELOC_UNAVAILABLE_ERROR`. This is a compiler bug, consider reporting it."]
+
+[[errors]]
+v1_errors = ["Error: error[E07002]: mutable ownership violated"]
+v2_errors = ["bug: bytecode verification failed with unexpected status code `COPYLOC_EXISTS_BORROW_ERROR`. This is a compiler bug, consider reporting it."]
+
+[[errors]]
+v1_errors = ["Error: error[E07003]: invalid operation, could create dangling a reference"]
+v2_errors = []
+
+[[errors]]
+v1_errors = ["Error: error[E07006]: ambiguous usage of variable"]
+v2_errors = []
+
+[[errors]]
+v1_errors = ["VMError -- EQUALITY_OP_TYPE_MISMATCH_ERROR -- None"]
+v2_errors = ["error: cannot mutably borrow since immutable references exist"]
+
+[[errors]]
+v1_errors = ["VMError -- EXTRANEOUS_ACQUIRES_ANNOTATION -- None"]
+v2_errors = []

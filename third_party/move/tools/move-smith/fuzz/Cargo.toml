@@ -12,15 +12,8 @@ afl = "*"
 arbitrary = { workspace = true }
 libfuzzer-sys = { workspace = true }
 move-smith = { path = ".." }
-rand = { workspace = true }
 once_cell = { workspace = true }
-
-[[bin]]
-name = "compile_only"
-path = "fuzz_targets/compile_only.rs"
-test = false
-doc = false
-bench = false
+rand = { workspace = true }
 
 [[bin]]
 name = "transactional"

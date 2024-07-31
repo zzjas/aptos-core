@@ -6,16 +6,23 @@ license = "Apache-2.0"
 edition = "2021"
 
 [dependencies]
+anyhow = { workspace = true }
 arbitrary = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
+derive_builder = { workspace = true }
 env_logger = { workspace = true }
+glob = { workspace = true }
+indicatif = { workspace = true, features = ["rayon"] }
 log = { workspace = true }
 move-compiler-v2 = { path = "../../move-compiler-v2" }
 move-model = { path = "../../move-model" }
 move-package = { path = "../move-package" }
 move-transactional-test-runner = { path = "../../testing-infra/transactional-test-runner" }
 num-bigint = { workspace = true }
+once_cell = { workspace = true }
 rand = { workspace = true }
+rayon = { workspace = true }
+regex = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 tempfile = { workspace = true }
 tokio = { workspace = true }
@@ -26,21 +33,5 @@ name = "move_smith"
 path = "src/lib.rs"
 
 [[bin]]
-name = "raw2move"
-path = "src/cli/raw2move.rs"
-
-[[bin]]
-name = "generator"
-path = "src/cli/generator.rs"
-
-[[bin]]
-name = "check_artifact"
-path = "src/cli/check_artifact.rs"
-
-[[bin]]
-name = "run_transactional"
-path = "src/cli/run_transactional.rs"
-
-[[bin]]
-name = "flame"
-path = "src/cli/flame.rs"
+name = "move-smith"
+path = "src/cli/main.rs"

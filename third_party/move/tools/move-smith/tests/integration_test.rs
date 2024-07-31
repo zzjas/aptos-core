@@ -8,6 +8,7 @@ use move_smith::{
     config::*,
     move_smith::*,
     names::{Identifier, IdentifierKind as IDKind},
+    runner::Runner,
     types::*,
     utils::*,
 };
@@ -132,8 +133,9 @@ fn test_generation_and_check_compile() {
 
 #[test]
 fn test_run_transactional_test() {
+    let runner = Runner::new(&Config::default());
     let code = simple_compile_unit().emit_code();
-    run_transactional_test(code, &Config::default()).unwrap();
+    runner.run_transactional_test_unwrap(&code);
 }
 
 #[test]
@@ -152,8 +154,10 @@ module 0xCAFE::Module0 {
         x
     }
 }"#;
-    let result = run_transactional_test(code.to_string(), &Config::default());
-    assert!(result.is_err());
+    let runner = Runner::new(&Config::default());
+    let results = runner.run_transactional_test(code);
+    assert_eq!(results.len(), 1);
+    assert!(results[0].result.is_err());
 }
 
 #[test]

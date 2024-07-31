@@ -5,18 +5,23 @@
 
 use arbitrary::Unstructured;
 use libfuzzer_sys::fuzz_target;
-use move_smith::{
-    utils::{run_transactional_test, TransactionalResult},
-    CodeGenerator, MoveSmith,
-};
+use move_smith::{config::Config, runner::Runner, CodeGenerator, MoveSmith};
 use once_cell::sync::Lazy;
-use std::{env, fs::OpenOptions, io::Write, sync::Mutex, time::Instant};
+use std::{env, fs::OpenOptions, io::Write, path::PathBuf, sync::Mutex, time::Instant};
 
 static FILE_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+static CONFIG: Lazy<Config> = Lazy::new(|| {
+    let config_path =
+        env::var("MOVE_SMITH_CONFIG").unwrap_or_else(|_| "MoveSmith.toml".to_string());
+    let config_path = PathBuf::from(config_path);
+    Config::from_toml_file(&config_path)
+});
+
+static RUNNER: Lazy<Runner> = Lazy::new(|| Runner::new_with_known_errors(&CONFIG, false));
 
 fuzz_target!(|data: &[u8]| {
     let u = &mut Unstructured::new(data);
-    let mut smith = MoveSmith::default();
+    let mut smith = MoveSmith::new(&CONFIG);
     let do_profile = match env::var("MOVE_SMITH_PROFILING") {
         Ok(v) => v == "1",
         Err(_) => false,
@@ -37,21 +42,21 @@ fuzz_target!(|data: &[u8]| {
 
         let code = smith.get_compile_unit().emit_code();
         let start = Instant::now();
-        let result = run_transactional_test(code, &smith.config.take());
+        let results = RUNNER.run_transactional_test(&code);
         let elapsed = start.elapsed();
+
         profile_s.push_str(&format!(
             "move-smith-profile::time::transactional::{}ms\n",
             elapsed.as_millis()
         ));
 
-        let status = match result {
-            TransactionalResult::Ok => "Ok",
-            TransactionalResult::Timeout => "Timeout",
-            TransactionalResult::WarningsOnly => "WarningsOnly",
-            TransactionalResult::IgnoredErr(_) => "IgnoredErr",
-            TransactionalResult::Err(_) => "Err",
-        };
-        profile_s.push_str(&format!("move-smith-profile::status::{}\n", status));
+        for r in results.iter() {
+            let status = match r.result {
+                Ok(_) => "success",
+                Err(_) => "error",
+            };
+            profile_s.push_str(&format!("move-smith-profile::status::{}\n", status));
+        }
 
         let _lock = FILE_MUTEX.lock().unwrap();
         let mut file = OpenOptions::new()
@@ -60,13 +65,14 @@ fuzz_target!(|data: &[u8]| {
             .open("move-smith-profile.txt")
             .unwrap();
         file.write_all(profile_s.as_bytes()).unwrap();
-        result.unwrap();
+        RUNNER.check_results(&results);
     } else {
         match smith.generate(u) {
             Ok(()) => (),
             Err(_) => return,
         };
         let code = smith.get_compile_unit().emit_code();
-        run_transactional_test(code, &smith.config.take()).unwrap();
+        let results = RUNNER.run_transactional_test(&code);
+        RUNNER.check_results(&results);
     }
 });
