@@ -83,7 +83,10 @@ impl CodeGenerator for CompileUnit {
         }
 
         for r in &self.runs {
-            code.push(format!("//# run {} --signers 0xBEEF\n", r.name));
+            code.push(format!(
+                "//# run {} --signers 0xBEEF --gas-budget 10000\n",
+                r.name
+            ));
         }
 
         code
