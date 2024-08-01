@@ -11,6 +11,7 @@ pub mod env;
 pub mod move_smith;
 pub mod names;
 pub mod runner;
+pub mod selection;
 pub mod types;
 pub mod utils;
 

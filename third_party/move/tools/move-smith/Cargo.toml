@@ -20,7 +20,8 @@ move-package = { path = "../move-package" }
 move-transactional-test-runner = { path = "../../testing-infra/transactional-test-runner" }
 num-bigint = { workspace = true }
 once_cell = { workspace = true }
-rand = { workspace = true }
+rand = "0.8.5"
+rand_distr = "0.4.3"
 rayon = { workspace = true }
 regex = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
