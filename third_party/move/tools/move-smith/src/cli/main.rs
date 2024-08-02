@@ -14,6 +14,7 @@ use move_smith::{
         },
         Check, Command, Compile, Generate, MoveSmithEnv, Raw2move, Run,
     },
+    config::GenerationConfig,
     runner::{Runner, TransactionalResult},
     utils::create_move_package,
 };
@@ -27,7 +28,7 @@ use std::{
 };
 
 fn handle_check(env: &MoveSmithEnv, cmd: &Check) {
-    let runner = Runner::new_with_known_errors(&env.config, true);
+    let runner = Runner::new_with_known_errors(&env.config.fuzz, true);
     println!("[1/3] Reloaded known errors...");
 
     let corpus_dir = Path::new(&cmd.corpus_dir);
@@ -55,7 +56,7 @@ fn handle_check(env: &MoveSmithEnv, cmd: &Check) {
         .par_iter()
         .map(|input_file| {
             let bytes = fs::read(input_file).unwrap();
-            let (r, code) = raw2move(env, &bytes);
+            let (r, code) = raw2move(&env.config.generation, &bytes);
             let code = {
                 if !r.success {
                     pb.println(format!(
@@ -127,7 +128,8 @@ fn handle_generate(env: &MoveSmithEnv, cmd: &Generate) {
         .zip(seeds.par_iter())
         .progress_with(get_progress_bar_with_msg(cmd.num, "Generatin"))
         .map(|(file, seed)| {
-            let (_, code) = generate_move_with_seed(env, file, *seed, cmd.package);
+            let (_, code) =
+                generate_move_with_seed(&env.config.generation, file, *seed, cmd.package);
             code
         })
         .collect::<Vec<String>>();
@@ -139,7 +141,7 @@ fn handle_generate(env: &MoveSmithEnv, cmd: &Generate) {
 
     if !cmd.skip_run {
         println!("[2/2] Running transactional tests...");
-        let runner = Runner::new_with_known_errors(&env.config, false);
+        let runner = Runner::new_with_known_errors(&env.config.fuzz, false);
         let pb = get_progress_bar_with_msg(cmd.num, "Running");
         let timer = Instant::now();
         let results = codes
@@ -194,7 +196,7 @@ fn handle_raw2move(env: &MoveSmithEnv, cmd: &Raw2move) {
         },
         false => fs::read(cmd.raw_file.clone().unwrap()).unwrap(),
     };
-    let (r, code) = raw2move(env, &bytes);
+    let (r, code) = raw2move(&env.config.generation, &bytes);
     if let Some(save_as) = &cmd.save_as_package {
         let save_as = PathBuf::from(save_as);
         create_move_package(code.clone(), &save_as);
@@ -209,7 +211,7 @@ fn handle_raw2move(env: &MoveSmithEnv, cmd: &Raw2move) {
 fn handle_run(env: &MoveSmithEnv, cmd: &Run) {
     let code = fs::read_to_string(&cmd.file).unwrap();
     println!("Loaded code from file: {:?}", cmd.file);
-    let runner = Runner::new_with_known_errors(&env.config, true);
+    let runner = Runner::new_with_known_errors(&env.config.fuzz, true);
     let results = runner.run_transactional_test(&code);
     for r in results.iter() {
         match r.result.is_ok() {

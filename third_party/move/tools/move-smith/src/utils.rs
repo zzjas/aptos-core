@@ -69,15 +69,6 @@ pub fn get_random_bytes(seed: u64, length: usize) -> Vec<u8> {
     buffer
 }
 
-/// Turn raw bytes into a Move module.
-/// This is useful to check the libfuzzer's corpus.
-pub fn raw_to_compile_unit(data: &[u8]) -> Result<CompileUnit> {
-    let mut u = Unstructured::new(data);
-    let mut smith = MoveSmith::default();
-    smith.generate(&mut u)?;
-    Ok(smith.get_compile_unit())
-}
-
 /// Create a temporary Move file with the given code.
 // TODO: if on Linux, we can create in-memory file to reduce I/O
 pub fn create_tmp_move_file(code: &str, name_hint: Option<&str>) -> (PathBuf, TempDir) {

@@ -101,7 +101,7 @@ fn test_emit_code() {
 fn test_generation_and_compile() {
     let raw_data = get_random_bytes(12345, 8192);
     let mut u = Unstructured::new(&raw_data);
-    let mut smith = MoveSmith::default();
+    let mut smith = MoveSmith::new(&Config::default().generation);
     smith.generate(&mut u).unwrap();
     let compile_unit = smith.get_compile_unit();
     let lines = compile_unit.emit_code();
@@ -112,9 +112,9 @@ fn test_generation_and_compile() {
 
 #[test]
 fn test_generation_and_check_compile() {
-    let raw_data = get_random_bytes(54321, 1024 * 16);
+    let raw_data = get_random_bytes(1234, 1024 * 32);
     let mut u = Unstructured::new(&raw_data);
-    let mut smith = MoveSmith::default();
+    let mut smith = MoveSmith::new(&Config::default().generation);
     smith.generate(&mut u).unwrap();
     let compile_unit = smith.get_compile_unit();
     let code = compile_unit.emit_code();
@@ -133,7 +133,7 @@ fn test_generation_and_check_compile() {
 
 #[test]
 fn test_run_transactional_test() {
-    let runner = Runner::new(&Config::default());
+    let runner = Runner::new(&Config::default().fuzz);
     let code = simple_compile_unit().emit_code();
     runner.run_transactional_test_unwrap(&code);
 }
@@ -154,7 +154,7 @@ module 0xCAFE::Module0 {
         x
     }
 }"#;
-    let runner = Runner::new(&Config::default());
+    let runner = Runner::new(&Config::default().fuzz);
     let results = runner.run_transactional_test(code);
     assert_eq!(results.len(), 1);
     assert!(results[0].result.is_err());

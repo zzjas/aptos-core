@@ -4,6 +4,7 @@
 //! Low level random number/choice selection logic
 
 use arbitrary::{Arbitrary, Result, Unstructured};
+use log::trace;
 use rand::{rngs::StdRng, SeedableRng};
 use rand_distr::{Beta, Distribution};
 use serde::Deserialize;
@@ -19,13 +20,16 @@ pub struct RandomNumber {
     pub target: usize,
     /// The maximum value that can be selected
     pub max: usize,
+    #[serde(skip)]
+    once_value: Option<usize>,
 }
 
-/// Percentage of how often we select sane values vs large values
-const DEFAULT_THRESHOLD: usize = 99;
+/// How often we select sane values vs large values
+/// Divisor of 10000
+const DEFAULT_THRESHOLD: usize = 9950;
 
 /// Constants for the Beta distribution
-const DEFAULT_ALPHA: f64 = 6.0;
+const DEFAULT_ALPHA: f64 = 4.0;
 const DEFAULT_BETA: f64 = 9.0;
 
 impl RandomNumber {
@@ -33,23 +37,45 @@ impl RandomNumber {
         assert!(min <= max);
         assert!(target >= min && target <= max);
 
-        Self { min, target, max }
+        Self {
+            min,
+            target,
+            max,
+            once_value: None,
+        }
     }
 
     /// Select a random number
     /// * Most of the time, we will selected something in [min, target*2]. See `select_small`.
     /// * Rarely, we will select something greater than `target*2`. See `select_large`.
     pub fn select(&self, u: &mut Unstructured) -> Result<usize> {
-        if u.ratio(DEFAULT_THRESHOLD, 100usize)? {
+        if self.min == self.max {
+            return Ok(self.min);
+        }
+
+        let v = if u.ratio(DEFAULT_THRESHOLD, 10000usize)? {
             self.select_small(u)
         } else {
             self.select_large(u)
+        };
+        trace!("NUM: selected value: {:?} from: {:?}", v, self);
+        v
+    }
+
+    /// Select a number upon first time and cache it
+    pub fn select_once(&mut self, u: &mut Unstructured) -> Result<usize> {
+        if let Some(v) = self.once_value {
+            return Ok(v);
         }
+        let v = self.select(u)?;
+        self.once_value = Some(v);
+        Ok(v)
     }
 
     /// Select a number within [min, target*2]
-    /// We use a Beta distribution that mostly centers around `target`
-    /// but skews towards left
+    /// We use a Beta distribution that skew towards left of the target
+    /// The mode of the distribution is around
+    /// $(target * 2 - min) * (ALPHA - 1) / (ALPHA + BETA - 2)$
     fn select_small(&self, u: &mut Unstructured) -> Result<usize> {
         let dist = Beta::new(DEFAULT_ALPHA, DEFAULT_BETA).expect("Invalid Beta distribution");
         let mut rng = StdRng::seed_from_u64(u64::arbitrary(u)?);
@@ -71,7 +97,9 @@ impl RandomNumber {
 mod tests {
     use super::*;
     use crate::utils::get_random_bytes;
+    use serde::Deserialize;
     use std::collections::BTreeMap;
+    use toml;
 
     #[test]
     fn test_random_number_selection() {
@@ -117,9 +145,6 @@ mod tests {
         let left_percentage = (left_cnt as f64 / total) * 100.0;
         let right_percentage = (right_cnt as f64 / total) * 100.0;
 
-        assert!(very_sane_percentage > 80.0);
-        assert!(insane_percentage <= 1.0);
-        assert!(left_cnt > right_cnt);
         println!(
             "Very sane numbers: {} ({:.2}%)",
             very_sane_cnt, very_sane_percentage
@@ -131,5 +156,31 @@ mod tests {
         );
         println!("Number of left: {} ({:.2}%)", left_cnt, left_percentage);
         println!("Number of right: {} ({:.2}%)", right_cnt, right_percentage);
+
+        assert!(very_sane_percentage > 80.0);
+        assert!(insane_percentage <= 1.0);
+        assert!(left_cnt > right_cnt);
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct TestGen {
+        x: RandomNumber,
+        y: RandomNumber,
+    }
+
+    #[test]
+    fn test_random_number_deserialization() {
+        let toml_str = r#"
+            x = { min = 0, target = 10, max = 255 }
+            y = { min = 5, target = 100, max = 111 }
+        "#;
+        let gen = toml::from_str::<TestGen>(toml_str).unwrap();
+        assert_eq!(gen.x.min, 0);
+        assert_eq!(gen.x.target, 10);
+        assert_eq!(gen.x.max, 255);
+        assert_eq!(gen.y.min, 5);
+        assert_eq!(gen.y.target, 100);
+        assert_eq!(gen.y.max, 111);
+        println!("{:#?}", gen);
     }
 }

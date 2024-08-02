@@ -3,6 +3,7 @@
 
 //! Configuration for the MoveSmith fuzzer.
 
+use crate::selection::RandomNumber;
 use serde::Deserialize;
 use std::{
     collections::BTreeMap,
@@ -42,42 +43,42 @@ pub struct CompilerSetting {
 #[derive(Debug, Clone, Deserialize)]
 pub struct GenerationConfig {
     /// The number of `//# run 0xCAFE::ModuleX::funX` to invoke
-    pub num_runs_per_func: usize,
+    pub num_runs_per_func: RandomNumber,
     /// The number of functions that can have `inline`
-    pub max_num_inline_funcs: usize,
+    pub num_inline_funcs: RandomNumber,
 
-    pub max_num_modules: usize,
-    pub max_num_functions_in_module: usize,
-    pub max_num_structs_in_module: usize,
+    pub num_modules: RandomNumber,
+    pub num_functions_in_module: RandomNumber,
+    pub num_structs_in_module: RandomNumber,
 
-    pub max_num_fields_in_struct: usize,
+    pub num_fields_in_struct: RandomNumber,
     /// The maximum total number of fields in all structs that can have
     /// type of another struct
-    pub max_num_fields_of_struct_type: usize,
+    pub num_fields_of_struct_type: RandomNumber,
 
     // Includes all kinds of statements
-    pub max_num_stmts_in_func: usize,
+    pub num_stmts_in_func: RandomNumber,
     // Addtionally insert some resource or vector operations
-    pub max_num_additional_operations_in_func: usize,
+    pub num_additional_operations_in_func: RandomNumber,
 
-    pub max_num_params_in_func: usize,
+    pub num_params_in_func: RandomNumber,
 
     // This has lowest priority
     // i.e. if the block is a function body
     // max_num_stmts_in_func will override this
-    pub max_num_stmts_in_block: usize,
+    pub num_stmts_in_block: RandomNumber,
 
-    pub max_num_calls_in_script: usize,
+    pub num_calls_in_script: RandomNumber,
 
     // Maximum depth of nested expression
-    pub max_expr_depth: usize,
+    pub expr_depth: RandomNumber,
     // Maximum depth of nested type instantiation
-    pub max_type_depth: usize,
+    pub type_depth: RandomNumber,
 
     // Maximum number of type parameters in a function
-    pub max_num_type_params_in_func: usize,
+    pub num_type_params_in_func: RandomNumber,
     // Maximum number of type parameters in a struct definition
-    pub max_num_type_params_in_struct: usize,
+    pub num_type_params_in_struct: RandomNumber,
 
     // Timeout in seconds
     pub generation_timeout_sec: usize, // MoveSmith generation timeout
@@ -86,7 +87,7 @@ pub struct GenerationConfig {
     pub allow_recursive_calls: bool,
 
     // Maximum number of bytes to construct hex or byte string
-    pub max_hex_byte_str_size: usize,
+    pub hex_byte_str_size: RandomNumber,
 }
 
 impl Default for Config {
@@ -112,19 +113,21 @@ impl Config {
         config
     }
 
+    pub fn get_compiler_setting(&self, name: &str) -> Option<&CompilerSetting> {
+        self.fuzz.compiler_settings.get(name)
+    }
+}
+
+impl FuzzConfig {
     /// Returns (Name, Compiler Configurations) for each run
     pub fn runs(&self) -> Vec<(String, CompilerSetting)> {
         let mut runs = vec![];
-        for r in self.fuzz.runs.iter() {
-            if let Some(setting) = self.fuzz.compiler_settings.get(r) {
+        for r in self.runs.iter() {
+            if let Some(setting) = self.compiler_settings.get(r) {
                 runs.push((r.clone(), setting.clone()));
             }
         }
         runs
-    }
-
-    pub fn get_compiler_setting(&self, name: &str) -> Option<&CompilerSetting> {
-        self.fuzz.compiler_settings.get(name)
     }
 }
 

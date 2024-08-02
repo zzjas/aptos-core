@@ -20,7 +20,7 @@
 use crate::{
     ast::*,
     codegen::CodeGenerator,
-    config::Config,
+    config::GenerationConfig,
     env::Env,
     names::{Identifier, IdentifierKind as IDKinds, Scope, ROOT_SCOPE},
     types::{
@@ -48,16 +48,9 @@ pub struct MoveSmith {
     env: RefCell<Env>,
 }
 
-impl Default for MoveSmith {
-    /// Create a new MoveSmith instance with default configuration.
-    fn default() -> Self {
-        Self::new(&Config::default())
-    }
-}
-
 impl MoveSmith {
     /// Create a new MoveSmith instance with the given configuration.
-    pub fn new(config: &Config) -> Self {
+    pub fn new(config: &GenerationConfig) -> Self {
         let env = Env::new(config);
         Self {
             modules: Vec::new(),
@@ -98,7 +91,10 @@ impl MoveSmith {
     ///
     /// Script is generated after all modules are generated so that the script can call functions.
     pub fn generate(&mut self, u: &mut Unstructured) -> Result<()> {
-        let num_modules = u.int_in_range(1..=self.env().config.max_num_modules)?;
+        self.env_mut().initialize(u);
+        trace!("Configuration: {:#?}", self.env());
+        let num_modules = self.env().config.num_modules.select(u)?;
+        trace!("NUM: generating {} modules", num_modules);
 
         for _ in 0..num_modules {
             self.modules
@@ -232,7 +228,7 @@ impl MoveSmith {
         // If a function calls itself, we cnanot inline it
         if body_code.contains(&self_name) {
             function.borrow_mut().signature.inline = false;
-        } else if !self.env().reached_inline_function_limit() && bool::arbitrary(u)? {
+        } else if !self.env_mut().reached_inline_function_limit(u) && bool::arbitrary(u)? {
             function.borrow_mut().signature.inline = true;
             self.env_mut().inc_inline_func_counter();
         }
@@ -268,7 +264,8 @@ impl MoveSmith {
                 all_funcs.push(f.clone());
             }
         }
-        let num_calls = u.int_in_range(1..=self.env().config.max_num_calls_in_script)?;
+        let num_calls = self.env().config.num_calls_in_script.select(u)?;
+        trace!("NUM: generating {} calls in the script", num_calls);
         for _ in 0..num_calls {
             let func = u.choose(&all_funcs)?;
             let mut call = self.generate_call_to_function(
@@ -292,7 +289,8 @@ impl MoveSmith {
 
         // Struct names
         let mut structs = Vec::new();
-        let num_structs = u.int_in_range(1..=self.env().config.max_num_structs_in_module)?;
+        let num_structs = self.env().config.num_structs_in_module.select(u)?;
+        trace!("NUM: generating {} struct skeletons", num_structs);
         for _ in 0..num_structs {
             structs.push(RefCell::new(self.generate_struct_skeleton(u, &scope)?));
         }
@@ -314,7 +312,8 @@ impl MoveSmith {
 
         // Function signatures
         let mut functions = Vec::new();
-        let num_funcs = u.int_in_range(1..=self.env().config.max_num_functions_in_module)?;
+        let num_funcs = self.env().config.num_functions_in_module.select(u)?;
+        trace!("NUM: generating {} function skeletons", num_funcs);
         for _ in 0..num_funcs {
             functions.push(RefCell::new(self.generate_function_skeleton(u, &scope)?));
         }
@@ -359,7 +358,7 @@ impl MoveSmith {
         trace!("Generating runners for module: {:?}", module.borrow().name);
         // For runners, we don't want complex expressions to reduce input
         // consumption and to avoid wasting mutation
-        self.env_mut().set_max_expr_depth(0);
+        self.env_mut().expr_depth.set_max_depth(0);
 
         let mut all_runners = Vec::new();
         for f in module.borrow().functions.iter() {
@@ -367,7 +366,7 @@ impl MoveSmith {
         }
 
         // Reset the expression depth because we will also genereate other modules
-        self.env_mut().reset_max_expr_depth();
+        self.env_mut().expr_depth.reset_max_depth();
 
         // Insert the runners to the module and add run tasks to the whole compile unit
         // Each task is simply the flat name of the runner function
@@ -394,7 +393,12 @@ impl MoveSmith {
     ) -> Result<Vec<Function>> {
         let signature = callee.borrow().signature.clone();
         let mut runners = Vec::new();
-        let num_runs = u.int_in_range(1..=self.env().config.num_runs_per_func)?;
+        let num_runs = self.env().config.num_runs_per_func.select(u)?;
+        trace!(
+            "NUM: generating {} runners for function: {:?}",
+            num_runs,
+            signature
+        );
         for i in 0..num_runs {
             let sref_dec = Statement::Decl(Declaration {
                 names: vec![self.env().type_pool.get_signer_ref_var()],
@@ -472,7 +476,12 @@ impl MoveSmith {
         // Generate type parameters for the struct
         // NOTE: All parameters will have copy+drop for now to avoid having no expression to generate
         let mut type_parameters = Vec::new();
-        let num_tps = u.int_in_range(0..=self.env().config.max_num_type_params_in_struct)?;
+        let num_tps = self.env().config.num_type_params_in_struct.select(u)?;
+        trace!(
+            "NUM: generating {} type parameters for struct: {:?}",
+            num_tps,
+            name
+        );
         for _ in 0..num_tps {
             type_parameters.push(self.generate_type_parameter(
                 u,
@@ -513,7 +522,12 @@ impl MoveSmith {
         parent_scope: &Scope,
     ) -> Result<()> {
         let struct_scope = self.env().id_pool.get_scope_for_children(&st.borrow().name);
-        let num_fields = u.int_in_range(0..=self.env().config.max_num_fields_in_struct)?;
+        let num_fields = self.env().config.num_fields_in_struct.select(u)?;
+        trace!(
+            "NUM: generating {} fields for struct: {:?}",
+            num_fields,
+            st.borrow().name
+        );
         for _ in 0..num_fields {
             let (name, _) = self.get_next_identifier(IDKinds::Var, &struct_scope);
 
@@ -534,7 +548,7 @@ impl MoveSmith {
                     // Use another struct as the field
                     2 => {
                         // We can no longer generate struct types if we reach the limit
-                        if self.env().reached_struct_type_field_limit() {
+                        if self.env_mut().reached_struct_type_field_limit(u) {
                             break self.get_random_type(
                                 u,
                                 &struct_scope,
@@ -761,7 +775,12 @@ impl MoveSmith {
     ) -> Result<FunctionSignature> {
         // First generate type parameters so that they can be used in the parameters and return type
         let mut type_parameters = Vec::new();
-        let num_tps = u.int_in_range(0..=self.env().config.max_num_type_params_in_func)?;
+        let num_tps = self.env().config.num_type_params_in_func.select(u)?;
+        trace!(
+            "NUM: generating {} type parameters for function: {:?}",
+            num_tps,
+            name
+        );
         for _ in 0..num_tps {
             type_parameters.push(self.generate_type_parameter(
                 u,
@@ -774,12 +793,17 @@ impl MoveSmith {
             )?);
         }
 
-        let num_params = u.int_in_range(0..=self.env().config.max_num_params_in_func)?;
+        let num_params = self.env().config.num_params_in_func.select(u)?;
         let mut parameters = vec![(
             self.env().type_pool.get_signer_ref_var(),
             Type::Ref(Box::new(Type::Signer)),
         )];
 
+        trace!(
+            " NUM: generating {} parameters for function: {:?}",
+            num_params,
+            name
+        );
         for _ in 0..num_params {
             let (name, _) = self.get_next_identifier(IDKinds::Var, parent_scope);
             let typ = self.get_random_type(u, parent_scope, true, false, true, false, true)?;
@@ -887,18 +911,19 @@ impl MoveSmith {
         trace!(
             "Generating block with parent scope: {:?}, depth: {}",
             parent_scope,
-            self.env().curr_expr_depth()
+            self.env().expr_depth.curr_depth()
         );
         let (name, block_scope) = self.get_next_identifier(IDKinds::Block, parent_scope);
         trace!("Created block scope: {:?}", block_scope);
 
-        let reach_limit = self.env().will_reached_expr_depth_limit(1);
+        let reach_limit = self.env().expr_depth.will_reached_depth_limit(1);
         let stmts = if reach_limit {
             warn!("Max expr depth will be reached in this block, skipping generating body");
             Vec::new()
         } else {
             let num_stmts =
-                num_stmts.unwrap_or(u.int_in_range(0..=self.env().config.max_num_stmts_in_block)?);
+                num_stmts.unwrap_or(self.env_mut().config.num_stmts_in_block.select_once(u)?);
+            trace!("Generating {} statements for block", num_stmts);
             self.generate_statements(u, &block_scope, num_stmts)?
         };
         let return_expr = match ret_typ {
@@ -935,10 +960,17 @@ impl MoveSmith {
         parent_scope: &Scope,
         num_stmts: usize,
     ) -> Result<Vec<Statement>> {
-        trace!("Generating {} statements", num_stmts);
         let mut stmts = Vec::new();
-        let mut num_addtional =
-            u.int_in_range(0..=self.env().config.max_num_additional_operations_in_func)?;
+        let mut num_addtional = self
+            .env_mut()
+            .config
+            .num_additional_operations_in_func
+            .select_once(u)?;
+        trace!(
+            "NUM: generating {} statements with {} additional operations",
+            num_stmts,
+            num_addtional
+        );
 
         for i in 0..num_stmts {
             trace!("Generating statement #{}", i + 1);
@@ -1021,7 +1053,7 @@ impl MoveSmith {
                 // Choose a small size for the initial vector length
                 for _ in 0..u.int_in_range(1..=3)? {
                     // Do not generate too large expressions for vector elements
-                    self.env_mut().set_max_expr_depth(2);
+                    self.env_mut().expr_depth.set_max_depth(2);
                     elems.push(self.generate_expression_of_type(
                         u,
                         parent_scope,
@@ -1029,13 +1061,13 @@ impl MoveSmith {
                         true,
                         false,
                     )?);
-                    self.env_mut().reset_max_expr_depth();
+                    self.env_mut().expr_depth.reset_max_depth();
                 }
                 VectorLiteral::Multiple(typ, elems)
             },
             2 => {
                 let mut s = String::new();
-                let num_bytes = u.int_in_range(1..=self.env().config.max_hex_byte_str_size)?;
+                let num_bytes = self.env().config.hex_byte_str_size.select(u)?;
                 for _ in 0..num_bytes {
                     if u.int_in_range(0..=10)? > 8 {
                         // Choose an escape character
@@ -1069,7 +1101,7 @@ impl MoveSmith {
             },
             3 => {
                 let mut hex = String::new();
-                let num_bytes = u.int_in_range(1..=self.env().config.max_hex_byte_str_size)?;
+                let num_bytes = self.env().config.hex_byte_str_size.select(u)?;
                 for _ in 0..num_bytes {
                     hex.push_str(&format!("{:02x}", u8::arbitrary(u)?));
                 }
@@ -1169,9 +1201,9 @@ impl MoveSmith {
 
         for arg_type in op.args_types(&elem_typ) {
             // Do not generate too large expressions for vector operation arguments
-            self.env_mut().set_max_expr_depth(2);
+            self.env_mut().expr_depth.set_max_depth(2);
             args.push(self.generate_expression_of_type(u, parent_scope, &arg_type, true, false)?);
-            self.env_mut().reset_max_expr_depth()
+            self.env_mut().expr_depth.reset_max_depth();
         }
 
         trace!(
@@ -1403,14 +1435,14 @@ impl MoveSmith {
         trace!("Generating expression from scope: {:?}", parent_scope);
         // Increment the expression depth
         // Reached the maximum depth, generate a dummy number literal
-        if self.env().reached_expr_depth_limit() {
+        if self.env().expr_depth.reached_depth_limit() {
             warn!("Max expr depth reached in scope: {:?}", parent_scope);
             return Ok(Expression::NumberLiteral(
                 self.generate_number_literal(u, None, None, None)?,
             ));
         }
 
-        self.env_mut().increase_expr_depth(u);
+        self.env_mut().expr_depth.increase_depth();
 
         // If no function is callable, then skip generating function calls.
         let func_call_weight = match self.get_callable_functions(parent_scope).is_empty() {
@@ -1484,7 +1516,7 @@ impl MoveSmith {
         };
 
         // Decrement the expression depth
-        self.env_mut().decrease_expr_depth();
+        self.env_mut().expr_depth.decrease_depth();
         Ok(expr)
     }
 
@@ -1508,7 +1540,7 @@ impl MoveSmith {
             return None;
         }
 
-        self.env_mut().increase_type_depth(u);
+        self.env_mut().type_depth.increase_depth();
 
         let concretized = match typ {
             Type::TypeParameter(tp) => {
@@ -1530,7 +1562,7 @@ impl MoveSmith {
             _ => panic!("{:?} cannot be concretized.", typ),
         };
 
-        self.env_mut().decrease_type_depth();
+        self.env_mut().type_depth.decrease_depth();
         trace!("Concretized type {:?} to: {:?}", typ, concretized);
         Some(concretized)
     }
@@ -1619,7 +1651,7 @@ impl MoveSmith {
         // !!! This is ensured because we insert a struct with all abilities
         // !!! to all modules
         let mut choices = self.get_types_with_abilities(parent_scope, &constraints, true);
-        if self.env().reached_type_depth_limit() {
+        if self.env().type_depth.reached_depth_limit() {
             warn!("Max type depth reached, choosing concrete types");
             choices.retain(|t| t.is_concrete())
         }
@@ -1678,6 +1710,12 @@ impl MoveSmith {
         allow_var: bool,
         allow_call: bool,
     ) -> Result<Expression> {
+        trace!("Remaining length of the input: {}", u.len());
+        if u.len() > 16 {
+            let bytes = u.peek_bytes(16).unwrap();
+            let hex_string: String = bytes.iter().map(|byte| format!("{:02x}", byte)).collect();
+            trace!("Next few bytes: 0x{}", hex_string);
+        }
         if self.env().check_timeout() {
             // Just return a random error...
             return Err(Error::IncorrectFormat);
@@ -1839,11 +1877,11 @@ impl MoveSmith {
             "No default choices for type: {:?}",
             typ
         );
-        if self.env().reached_expr_depth_limit() {
+        if self.env().expr_depth.reached_depth_limit() {
             warn!("Max expr depth reached while gen expr of type: {:?}", typ);
             return Ok(u.choose(&default_choices)?.clone());
         }
-        self.env_mut().increase_expr_depth(u);
+        self.env_mut().expr_depth.increase_depth();
 
         let callables: Vec<FunctionSignature> = self
             .get_callable_functions(parent_scope)
@@ -1911,7 +1949,7 @@ impl MoveSmith {
         };
 
         // Decrement the expression depth
-        self.env_mut().decrease_expr_depth();
+        self.env_mut().expr_depth.decrease_depth();
 
         let use_choice = match choices.is_empty() {
             true => default_choices,

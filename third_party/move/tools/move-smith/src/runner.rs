@@ -3,7 +3,7 @@
 
 //! Transactional test runner helpers
 
-use crate::{config::Config, utils::create_tmp_move_file};
+use crate::{config::FuzzConfig, utils::create_tmp_move_file};
 use anyhow::Result;
 use glob::glob;
 use move_model::metadata::LanguageVersion;
@@ -85,7 +85,7 @@ pub struct ErrorPool {
 }
 
 pub struct Runner {
-    config: Config,
+    config: FuzzConfig,
     pub error_pool: ErrorPool,
 }
 
@@ -329,28 +329,25 @@ impl TransactionalResult {
 }
 
 impl Runner {
-    pub fn new(config: &Config) -> Self {
+    pub fn new(config: &FuzzConfig) -> Self {
         Self {
             config: config.clone(),
-            error_pool: ErrorPool::new(&config.fuzz.ignore_strs),
+            error_pool: ErrorPool::new(&config.ignore_strs),
         }
     }
 
-    pub fn new_with_errors(config: &Config, known_errors: &Errors) -> Self {
+    pub fn new_with_errors(config: &FuzzConfig, known_errors: &Errors) -> Self {
         let mut runner = Self::new(config);
         runner.error_pool.known_errors = known_errors.clone();
         runner
     }
 
-    pub fn new_with_known_errors(config: &Config, force_reprocess: bool) -> Self {
+    pub fn new_with_known_errors(config: &FuzzConfig, force_reprocess: bool) -> Self {
         let mut runner = Self::new(config);
-        let toml_path = config.fuzz.known_error_dir.join("known_errors.toml");
+        let toml_path = config.known_error_dir.join("known_errors.toml");
         if !toml_path.exists() || force_reprocess {
-            println!(
-                "Processing known errors at {:?}",
-                config.fuzz.known_error_dir
-            );
-            ErrorPool::process_known_errors_dir(&runner, &config.fuzz.known_error_dir, &toml_path)
+            println!("Processing known errors at {:?}", config.known_error_dir);
+            ErrorPool::process_known_errors_dir(&runner, &config.known_error_dir, &toml_path)
                 .expect("Failed to process known errors");
         }
 

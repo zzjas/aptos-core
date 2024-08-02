@@ -1,6 +1,5 @@
 use crate::{
-    cli::MoveSmithEnv,
-    config::CompilerSetting,
+    config::{CompilerSetting, GenerationConfig},
     runner::TransactionalTestError,
     utils::{compile_move_code, create_move_package},
     CodeGenerator, MoveSmith,
@@ -17,7 +16,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-const BUFFER_SIZE_START: usize = 1024 * 8;
+const BUFFER_SIZE_START: usize = 1024 * 16;
 
 #[derive(Debug, Clone, Builder, Default)]
 #[builder(setter(into, strip_option), default)]
@@ -50,11 +49,11 @@ impl CheckReportError {
     }
 }
 
-pub fn raw2move(env: &MoveSmithEnv, bytes: &[u8]) -> (TaskResult, String) {
+pub fn raw2move(conf: &GenerationConfig, bytes: &[u8]) -> (TaskResult, String) {
     let mut u = Unstructured::new(bytes);
 
     let timer = Instant::now();
-    let mut smith = MoveSmith::new(&env.config);
+    let mut smith = MoveSmith::new(&conf);
     match smith.generate(&mut u) {
         Ok(_) => (),
         Err(e) => {
@@ -90,7 +89,7 @@ pub fn generate_seeds(seed: u64, num: u64) -> Vec<u64> {
 /// If `package` is true, the `output_path` should be the path to the `.move` file.
 /// If `package` is false, the `output_path` should be the path to the directory where the package will be saved.
 pub fn generate_move_with_seed(
-    env: &MoveSmithEnv,
+    conf: &GenerationConfig,
     output_path: &PathBuf,
     seed: u64,
     package: bool,
@@ -106,7 +105,10 @@ pub fn generate_move_with_seed(
             rng.fill(&mut new_buffer[..]);
             buffer.extend(new_buffer);
         }
-        let (r, code) = raw2move(env, &buffer);
+        let (r, code) = raw2move(conf, &buffer);
+        if r.log.contains("ormat") {
+            return (r, "".to_string());
+        }
         if r.success {
             break code;
         }
