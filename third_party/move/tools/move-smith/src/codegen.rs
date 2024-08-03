@@ -419,6 +419,11 @@ impl CodeGenerator for Expression {
             Expression::Resource(rop) => rop.emit_code_lines(),
             Expression::VectorOperation(vop) => vop.emit_code_lines(),
             Expression::VectorLiteral(vlit) => vlit.emit_code_lines(),
+            Expression::Return(e) => match e {
+                Some(expr) => vec![format!("return {}", expr.inline())],
+                None => vec!["return".to_string()],
+            },
+            Expression::Abort(e) => vec![format!("abort {}", e.inline())],
         }
     }
 }

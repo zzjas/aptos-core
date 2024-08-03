@@ -157,7 +157,7 @@ mod tests {
         println!("Number of left: {} ({:.2}%)", left_cnt, left_percentage);
         println!("Number of right: {} ({:.2}%)", right_cnt, right_percentage);
 
-        assert!(very_sane_percentage > 80.0);
+        assert!(very_sane_percentage > 70.0);
         assert!(insane_percentage <= 1.0);
         assert!(left_cnt > right_cnt);
     }

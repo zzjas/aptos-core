@@ -184,6 +184,8 @@ pub enum Expression {
     Reference(Box<Expression>),
     Dereference(Box<Expression>),
     MutReference(Box<Expression>),
+    Return(Option<Box<Expression>>),
+    Abort(Box<Expression>),
 
     // The following three are expressions but may contain let bindings
     Resource(ResourceOperation),
@@ -529,6 +531,12 @@ impl<'a> ExprCollector<'a> {
                 for e in exprs {
                     self.visit_expr(e);
                 }
+            },
+            Expression::Return(Some(e)) => {
+                self.visit_expr(e);
+            },
+            Expression::Abort(e) => {
+                self.visit_expr(e);
             },
             _ => (),
         }

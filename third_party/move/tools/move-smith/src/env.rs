@@ -4,6 +4,7 @@
 //! Manages the various information during generation
 
 use crate::{
+    ast::FunctionSignature,
     config::GenerationConfig,
     names::{Identifier, IdentifierKind as IDKind, IdentifierPool, Scope},
     selection::RandomNumber,
@@ -34,6 +35,8 @@ pub struct Env {
 
     /// Number of fields that has type of another struct
     struct_type_field_counter: usize,
+
+    pub curr_func_signature: Option<FunctionSignature>,
 }
 
 /// A ring buffer to keep track of the max depth of expression/types.
@@ -231,6 +234,7 @@ impl Env {
             timeout: std::time::Duration::from_secs(config.generation_timeout_sec as u64),
             inline_func_counter: 0,
             struct_type_field_counter: 0,
+            curr_func_signature: None,
         }
     }
 

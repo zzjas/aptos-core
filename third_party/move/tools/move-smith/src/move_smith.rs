@@ -745,6 +745,7 @@ impl MoveSmith {
             .id_pool
             .get_scope_for_children(&function.borrow().signature.name);
         let signature = function.borrow().signature.clone();
+        self.env_mut().curr_func_signature = Some(signature.clone());
         trace!(
             "Creating block for the body of function: {:?}",
             signature.name
@@ -759,6 +760,7 @@ impl MoveSmith {
         let body = self.generate_block(u, &scope, None, signature.return_type.clone())?;
         function.borrow_mut().body = Some(body);
         self.post_process_function(u, function)?;
+        self.env_mut().curr_func_signature = None;
         Ok(())
     }
 
@@ -1698,6 +1700,48 @@ impl MoveSmith {
         }
     }
 
+    /// Generate a return expression
+    /// If `typ` is None, will return ()
+    fn generate_return_expr(
+        &self,
+        u: &mut Unstructured,
+        parent_scope: &Scope,
+    ) -> Result<Expression> {
+        let sig = self.env().curr_func_signature.clone();
+        let inner = match sig {
+            Some(sig) => match sig.return_type {
+                Some(t) => Some(Box::new(self.generate_expression_of_type(
+                    u,
+                    parent_scope,
+                    &t,
+                    true,
+                    true,
+                )?)),
+                None => None,
+            },
+            None => None,
+        };
+
+        Ok(Expression::Return(inner))
+    }
+
+    /// Generate an abort expression with an expression of type `U64` as the abort code.
+    fn generate_abort(
+        &self,
+        u: &mut Unstructured,
+        parent_scope: &Scope,
+        code: Option<u64>,
+    ) -> Result<Expression> {
+        let code = Box::new(match code {
+            Some(c) => Expression::NumberLiteral(NumberLiteral {
+                value: BigUint::from(c),
+                typ: Type::U64,
+            }),
+            None => self.generate_expression_of_type(u, parent_scope, &Type::U64, true, true)?,
+        });
+        Ok(Expression::Abort(code))
+    }
+
     /// Generate an expression of the given type or its subtype.
     ///
     /// `allow_var`: allow using variable access, this is disabled for script
@@ -1836,8 +1880,11 @@ impl MoveSmith {
             }
         }
 
-        // If the default choice is empty here, it means we are working on a
-        // reference type but cannot find a variable for it.
+        // If the default choice is empty here and we are working on a
+        // reference type but cannot find a variable, in this case, we could
+        // generate the inner type.
+        //
+        // If the type if not a reference, we need to faul back to abort
         if default_choices.is_empty() {
             trace!(
                 "No default choices for type: {} <-- should be a ref",
@@ -1867,6 +1914,9 @@ impl MoveSmith {
             if let Some(e) = ref_expr {
                 default_choices.push(e.clone());
                 choices.push(e);
+            } else {
+                // Abort can always be treated as a default choice for any type
+                default_choices.push(self.generate_abort(u, parent_scope, Some(112233))?);
             }
         }
 
@@ -1881,7 +1931,22 @@ impl MoveSmith {
             warn!("Max expr depth reached while gen expr of type: {:?}", typ);
             return Ok(u.choose(&default_choices)?.clone());
         }
+
         self.env_mut().expr_depth.increase_depth();
+
+        // TODO: merge this into the other selections
+        if u.ratio(
+            (self.env().config.return_abort_possibility * 1000.0) as u64,
+            1000u64,
+        )? {
+            let expr = if bool::arbitrary(u)? {
+                self.generate_return_expr(u, parent_scope)
+            } else {
+                self.generate_abort(u, parent_scope, None)
+            };
+            self.env_mut().expr_depth.decrease_depth();
+            return expr;
+        }
 
         let callables: Vec<FunctionSignature> = self
             .get_callable_functions(parent_scope)
