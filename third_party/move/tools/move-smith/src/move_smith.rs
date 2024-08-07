@@ -850,7 +850,7 @@ impl MoveSmith {
     }
 
     /// Generate a type parameter with random abilities.
-    /// Albilities in `include` will always be included.
+    /// Abilities in `include` will always be included.
     /// Abilities in `exclude` will not be used.
     fn generate_type_parameter(
         &self,

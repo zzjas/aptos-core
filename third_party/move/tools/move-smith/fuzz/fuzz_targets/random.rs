@@ -17,7 +17,7 @@ static CONFIG: Lazy<Config> = Lazy::new(|| {
     Config::from_toml_file(&config_path)
 });
 
-static RUNNER: Lazy<Runner> = Lazy::new(|| Runner::new_with_known_errors(&CONFIG, false));
+static RUNNER: Lazy<Runner> = Lazy::new(|| Runner::new_with_known_errors(&CONFIG.fuzz, false));
 
 const INITIAL_BUFFER_SIZE: usize = 1024 * 4;
 const MAX_BUFFER_SIZE: usize = 1024 * 1024;
@@ -42,7 +42,7 @@ fuzz_target!(|data: &[u8]| {
             buffer.extend(new_buffer);
         }
 
-        let mut smith = MoveSmith::new(&CONFIG);
+        let mut smith = MoveSmith::new(&CONFIG.generation);
         let u = &mut Unstructured::new(&buffer);
         match smith.generate(u) {
             Ok(()) => break smith.get_compile_unit().emit_code(),
@@ -58,5 +58,6 @@ fuzz_target!(|data: &[u8]| {
         buffer_size *= 2;
     };
 
-    RUNNER.run_transactional_test_unwrap(&code);
+    let results = RUNNER.run_transactional_test(&code);
+    RUNNER.keep_and_check_results(&results);
 });

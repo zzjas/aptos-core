@@ -420,10 +420,10 @@ impl CodeGenerator for Expression {
             Expression::VectorOperation(vop) => vop.emit_code_lines(),
             Expression::VectorLiteral(vlit) => vlit.emit_code_lines(),
             Expression::Return(e) => match e {
-                Some(expr) => vec![format!("return {}", expr.inline())],
-                None => vec!["return".to_string()],
+                Some(expr) => vec![format!("(return {})", expr.inline())],
+                None => vec!["(return)".to_string()],
             },
-            Expression::Abort(e) => vec![format!("abort {}", e.inline())],
+            Expression::Abort(e) => vec![format!("(abort {})", e.inline())],
         }
     }
 }

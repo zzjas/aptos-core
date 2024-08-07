@@ -22,7 +22,8 @@ use std::{
 };
 use toml;
 
-static RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(local\s+`[^`]+`|module\s+'[^']+')").unwrap());
+static RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(local\s+`[^`]+`|module\s+'[^']+')|type\s+`[^`]+`").unwrap());
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 pub struct ErrorLine(pub String);
@@ -177,12 +178,19 @@ impl ErrorPool {
 
 impl ErrorLine {
     pub fn from_log_line(line: &str) -> Self {
+        if line.contains("cannot extract resource") || line.contains("function acquires global") {
+            return Self("cannot acquire...".to_string());
+        }
         let replaced = RE
             .replace_all(line, |caps: &regex::Captures| {
                 if caps[0].starts_with("local") {
                     "variable".to_string()
-                } else {
+                } else if caps[0].starts_with("type") {
+                    "type".to_string()
+                } else if caps[0].starts_with("module") {
                     "module".to_string()
+                } else {
+                    panic!("Unexpected match");
                 }
             })
             .to_string();
@@ -399,6 +407,16 @@ impl Runner {
     pub fn check_results(&self, results: &[TransactionalResult]) {
         for r in results.iter() {
             if !self.error_pool.should_skip_result(r) {
+                panic!("Found new error: {}", r.get_log());
+            }
+        }
+    }
+
+    pub fn keep_and_check_results(&mut self, results: &[TransactionalResult]) {
+        for r in results.iter() {
+            if !self.error_pool.should_skip_result(r) {
+                self.error_pool
+                    .add_known_error(r.result.clone().unwrap_err());
                 panic!("Found new error: {}", r.get_log());
             }
         }

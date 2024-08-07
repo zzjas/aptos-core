@@ -7,7 +7,14 @@ use arbitrary::Unstructured;
 use libfuzzer_sys::fuzz_target;
 use move_smith::{config::Config, runner::Runner, CodeGenerator, MoveSmith};
 use once_cell::sync::Lazy;
-use std::{env, fs::OpenOptions, io::Write, path::PathBuf, sync::Mutex, time::Instant};
+use std::{
+    env,
+    fs::OpenOptions,
+    io::Write,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+    time::Instant,
+};
 
 static FILE_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 static CONFIG: Lazy<Config> = Lazy::new(|| {
@@ -17,11 +24,12 @@ static CONFIG: Lazy<Config> = Lazy::new(|| {
     Config::from_toml_file(&config_path)
 });
 
-static RUNNER: Lazy<Runner> = Lazy::new(|| Runner::new_with_known_errors(&CONFIG, false));
+static RUNNER: Lazy<Mutex<Runner>> =
+    Lazy::new(|| Mutex::new(Runner::new_with_known_errors(&CONFIG.fuzz, false)));
 
 fuzz_target!(|data: &[u8]| {
     let u = &mut Unstructured::new(data);
-    let mut smith = MoveSmith::new(&CONFIG);
+    let mut smith = MoveSmith::new(&CONFIG.generation);
     let do_profile = match env::var("MOVE_SMITH_PROFILING") {
         Ok(v) => v == "1",
         Err(_) => false,
@@ -42,7 +50,7 @@ fuzz_target!(|data: &[u8]| {
 
         let code = smith.get_compile_unit().emit_code();
         let start = Instant::now();
-        let results = RUNNER.run_transactional_test(&code);
+        let results = RUNNER.lock().unwrap().run_transactional_test(&code);
         let elapsed = start.elapsed();
 
         profile_s.push_str(&format!(
@@ -65,7 +73,8 @@ fuzz_target!(|data: &[u8]| {
             .open("move-smith-profile.txt")
             .unwrap();
         file.write_all(profile_s.as_bytes()).unwrap();
-        RUNNER.check_results(&results);
+
+        RUNNER.lock().unwrap().keep_and_check_results(&results);
     } else {
         match smith.generate(u) {
             Ok(()) => (),
@@ -73,6 +82,6 @@ fuzz_target!(|data: &[u8]| {
         };
         let code = smith.get_compile_unit().emit_code();
         let results = RUNNER.run_transactional_test(&code);
-        RUNNER.check_results(&results);
+        RUNNER.lock().keep_and_check_results(&results);
     }
 });

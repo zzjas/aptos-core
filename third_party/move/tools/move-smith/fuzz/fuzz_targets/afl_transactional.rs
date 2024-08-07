@@ -16,17 +16,18 @@ static CONFIG: Lazy<Config> = Lazy::new(|| {
     Config::from_toml_file(&config_path)
 });
 
-static RUNNER: Lazy<Runner> = Lazy::new(|| Runner::new_with_known_errors(&CONFIG, false));
+static RUNNER: Lazy<Runner> = Lazy::new(|| Runner::new_with_known_errors(&CONFIG.fuzz, false));
 
 fn main() {
     fuzz!(|data: &[u8]| {
         let u = &mut Unstructured::new(data);
-        let mut smith = MoveSmith::new(&CONFIG);
+        let mut smith = MoveSmith::new(&CONFIG.generation);
         match smith.generate(u) {
             Ok(()) => (),
             Err(_) => return,
         };
         let code = smith.get_compile_unit().emit_code();
-        RUNNER.run_transactional_test_unwrap(&code);
+        let results = RUNNER.run_transactional_test(&code);
+        RUNNER.keep_and_check_results(&results);
     });
 }

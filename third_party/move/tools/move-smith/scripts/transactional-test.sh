@@ -22,7 +22,7 @@ PATCH_FILE=$PROJ_ROOT/third_party/move/tools/move-smith/scripts/transactional-te
 mkdir -p $TEST_DIR
 rm -rf $TEST_DIR/*.move
 rm -rf $TEST_DIR/*.exp
-cargo run --bin generator -- -o $TEST_DIR -s 1234 -n $NUM_PROG
+cargo run --bin move-smith -- generate -o $TEST_DIR $NUM_PROG
 
 cd $TEST_DIR
 UB=1 cargo nextest run

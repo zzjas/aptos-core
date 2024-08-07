@@ -211,7 +211,8 @@ fn handle_raw2move(env: &MoveSmithEnv, cmd: &Raw2move) {
 fn handle_run(env: &MoveSmithEnv, cmd: &Run) {
     let code = fs::read_to_string(&cmd.file).unwrap();
     println!("Loaded code from file: {:?}", cmd.file);
-    let runner = Runner::new_with_known_errors(&env.config.fuzz, true);
+    // let runner = Runner::new_with_known_errors(&env.config.fuzz, true);
+    let runner = Runner::new(&env.config.fuzz);
     let results = runner.run_transactional_test(&code);
     for r in results.iter() {
         match r.result.is_ok() {
